@@ -1,18 +1,23 @@
 import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
-import { join } from 'node:path'
+import { join, resolve } from 'node:path'
 import { afterEach, expect, it } from 'vitest'
 import { createHash } from 'node:crypto'
 import { c as tar } from 'tar'
-import { downloadOfficeSidecar, runtimeNpmArchive } from './build-exe-for-python-sdk-office.ts'
+import { execa } from 'execa'
+import { downloadOfficeSidecar, officeSidecarArchives, runtimeNpmArchive } from './build-exe-for-python-sdk-office.ts'
+import { pnpmInvocation } from './executable-packaging.ts'
 
 import { officePackageDirectories } from './libreoffice-packages.mjs'
 
 const temporaryDirectories: string[] = []
+const deployedProcesses: Promise<unknown>[] = []
+const repository = resolve(import.meta.dirname, '..')
 
 afterEach(async () => {
+  await Promise.all(deployedProcesses.splice(0))
   await Promise.all(temporaryDirectories.splice(0).map(directory => rm(directory, { recursive: true, force: true })))
-})
+}, 600_000)
 
 async function fixture() {
   const root = await mkdtemp(join(tmpdir(), 'dsh-python-office-'))
@@ -146,3 +151,41 @@ it('takes npm integrity from the workspace lock without querying registry metada
   await writeFile(lockfile, JSON.stringify({ packages: { '@scope/fixture@1.2.3': { resolution: { integrity: 'sha256-invalid' } } } }))
   await expect(runtimeNpmArchive('@scope/fixture', '1.2.3', lockfile)).rejects.toThrow('missing SHA-512 integrity')
 })
+
+it('records the legacy deployed Office tslib archive in the reviewed root lock', async ({ signal }) => {
+  const root = await mkdtemp(join(repository, '.dsh-python-office-deploy-'))
+  temporaryDirectories.push(root)
+  const staging = join(root, 'staging')
+  const [command, args] = pnpmInvocation([
+    '--store-dir', join(root, 'store'),
+    '--cache-dir', join(root, 'cache'),
+    '--config.modules-dir=' + join(root, 'root-modules'),
+    '--config.virtual-store-dir=' + join(root, 'root-modules', '.pnpm'),
+    '--filter', 'dsh-python-runtime-closure', 'deploy', '--legacy', '--prod',
+    '--config.allow-unused-patches=true',
+    '--config.node-linker=hoisted',
+    '--config.auto-install-peers=false',
+    '--config.link-workspace-packages=true',
+    '--config.hoist-workspace-packages=false',
+    staging,
+  ])
+
+  const deployed = execa(command, args, {
+    cwd: repository,
+    env: { ...process.env, XDG_RUNTIME_DIR: join(root, 'runtime') },
+    reject: false,
+    cancelSignal: signal,
+    killDescendants: true,
+    timeout: 570_000,
+  })
+  deployedProcesses.push(deployed)
+  const result = await deployed
+
+  expect(result.timedOut, result.stderr).toBe(false)
+  expect(result.signal, result.stderr).toBeUndefined()
+  expect(result.exitCode, result.stderr).toBe(0)
+  const archives = await officeSidecarArchives(staging, { platform: process.platform, arch: process.arch })
+  const tslib = archives.find(archive => archive.name === 'tslib' && archive.version === '2.9.1')
+  expect(tslib).toBeDefined()
+  expect(tslib?.integrity).toBe((await runtimeNpmArchive('tslib', '2.9.1')).integrity)
+}, 600_000)
