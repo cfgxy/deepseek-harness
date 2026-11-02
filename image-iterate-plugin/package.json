@@ -1,0 +1,46 @@
+{
+  "name": "dsh-image-iterate-plugin",
+  "version": "0.1.0",
+  "description": "Bounded OpenAI-compatible image generation and visual review bundle for DeepSeek Harness.",
+  "type": "module",
+  "main": "index.js",
+  "exports": {
+    ".": "./index.js",
+    "./client": "./client.js"
+  },
+  "files": [
+    "index.js",
+    "src",
+    "client.js",
+    "cordis.patch.yml",
+    "README.md"
+  ],
+  "engines": {
+    "dsh": ">=0.2.1-rc.0 <0.3.0"
+  },
+  "peerDependencies": {
+    "@deepseek-ai/cordis": ">=4.0.0 <5.0.0",
+    "@deepseek-ai/dsh-attachment": ">=0.2.1-rc.0 <0.3.0",
+    "@deepseek-ai/dsh-credentials": ">=0.2.1-rc.0 <0.3.0",
+    "@deepseek-ai/dsh-llm": ">=0.2.1-rc.0 <0.3.0",
+    "@deepseek-ai/dsh-tools": ">=0.2.1-rc.0 <0.3.0",
+    "@deepseek-ai/schemastery": ">=3.0.0 <4.0.0"
+  },
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    },
+    "client": {
+      "inject": [
+        "@deepseek-ai/dsh-client-ui-tool",
+        "@deepseek-ai/dsh-client-ui-conversation",
+        "@deepseek-ai/dsh-client-ui-attachment"
+      ],
+      "platform": "web"
+    }
+  },
+  "scripts": {
+    "test": "node --test test/*.test.mjs",
+    "test:composition": "pnpm -C .. exec vitest run --config vitest.web.config.ts apps/web/tests/image-iterate-client.e2e.ts"
+  }
+}

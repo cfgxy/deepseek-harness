@@ -26,9 +26,14 @@ interface AssembledPlugin extends WebBootEntry {
   bundlePath: string
 }
 
+/** An externally supplied Web bundle loaded through the same graph as bundled client packages. */
+export interface AdditionalAssembledPlugin extends AssembledPlugin {}
+
 interface AssembledBootOptions {
   /** Package ids omitted from this mounted composition. */
   readonly exclude?: readonly string[]
+  /** External bundles appended to the assembled graph for a focused composition scenario. */
+  readonly additionalPlugins?: readonly AdditionalAssembledPlugin[]
   /** Remote answers owned by this assembled case. */
   readonly remote?: AssembledRemoteOptions
 }
@@ -279,7 +284,14 @@ export function installAssembledBootEnv(): void {
  */
 export function mountAssembledApp(options: AssembledBootOptions = {}): AssembledRemote {
   const excluded = new Set(options.exclude)
-  const plugins = PLUGINS.filter(plugin => !excluded.has(plugin.id))
+  const plugins = orderByModuleGraph([
+    ...PLUGINS,
+    ...(options.additionalPlugins ?? []),
+  ].filter(plugin => !excluded.has(plugin.id))).map(({ id }) => {
+    const plugin = [...PLUGINS, ...(options.additionalPlugins ?? [])].find(candidate => candidate.id === id)
+    if (plugin === undefined) throw new Error(`assembled boot: ordered unknown plugin ${id}`)
+    return plugin
+  })
   const remote = createAssembledRemote(options.remote)
   mountedRemote = remote.mock
   win.__DSH_TRANSPORT__ = { rpc: remote.mock.rpc }

@@ -36,7 +36,7 @@ interface WorkspaceView {
   updatedAt: string
 }
 
-interface EventRecord {
+export interface AssembledEventRecord {
   readonly type: 'event'
   readonly event: {
     readonly seq: number
@@ -51,7 +51,7 @@ interface FollowSnapshot {
   readonly type: 'snapshot'
   readonly header: Readonly<Record<string, unknown>>
   readonly cursor: number
-  readonly records: readonly EventRecord[]
+  readonly records: readonly AssembledEventRecord[]
   readonly hasMore: boolean
   readonly projections: Readonly<Record<string, unknown>>
   readonly assistantStream?: Readonly<Record<string, unknown>>
@@ -103,6 +103,10 @@ export interface AssembledRemoteOptions {
   readonly developerTools?: boolean
   /** Return the fixture's image-dimension admission error from Session prompt. */
   readonly rejectPrompt?: boolean
+  /** Test-local attachment ids backed by an existing fixture attachment's bytes. */
+  readonly attachmentAliases?: Readonly<Record<string, string>>
+  /** Extra durable events appended to the fixture history Session before it is opened. */
+  readonly alphaRecords?: readonly AssembledEventRecord[]
 }
 
 export interface AssembledRemote {
@@ -121,9 +125,13 @@ export function createAssembledRemote(options: AssembledRemoteOptions = {}): Ass
   const fixture = JSON.parse(fixtureSource) as CapturedFixture
   const sessions = [...structuredClone(fixture.sessionList.value.items)]
   const workspaces = [...structuredClone(fixture.workspace.value.items)]
-  const records = new Map<string, EventRecord[]>([[
+  const alphaRecords = [
+    ...(structuredClone(fixture.follow.records) as AssembledEventRecord[]),
+    ...(options.alphaRecords === undefined ? [] : structuredClone(options.alphaRecords)),
+  ]
+  const records = new Map<string, AssembledEventRecord[]>([[
     'fx-alpha',
-    structuredClone(fixture.follow.records) as EventRecord[],
+    alphaRecords,
   ]])
   const nextTurns = new Map([...records].map(([sessionId, sessionRecords]) => {
     let next = 0
@@ -135,6 +143,11 @@ export function createAssembledRemote(options: AssembledRemoteOptions = {}): Ass
     return [sessionId, next] as const
   }))
   const attachments = new Map<string, unknown>([['fixture:image', structuredClone(fixture.attachment)]])
+  for (const [alias, source] of Object.entries(options.attachmentAliases ?? {})) {
+    const stored = attachments.get(source)
+    if (stored === undefined) throw new Error(`assembled fixture attachment alias source missing: ${source}`)
+    attachments.set(alias, structuredClone(stored))
+  }
   const stagedImages = new Map<string, Record<string, unknown>>()
   const blankSessionProjections = fixture.control.value.projections['fx-gamma']
   if (blankSessionProjections === undefined) {
@@ -198,7 +211,11 @@ export function createAssembledRemote(options: AssembledRemoteOptions = {}): Ass
     const request = recordValue(args, 'request')
     const sessionId = followedSessionId(request)
     if (sessionId === 'fx-alpha') {
-      stream.push(structuredClone(fixture.follow))
+      stream.push({
+        ...structuredClone(fixture.follow),
+        cursor: alphaRecords.at(-1)?.event.seq ?? fixture.follow.cursor,
+        records: structuredClone(alphaRecords),
+      })
       return
     }
     const summary = sessions.find(candidate => candidate.sessionId === sessionId)
@@ -403,7 +420,7 @@ function eventOf(
   type: string,
   data: unknown,
   surfaceOp?: string,
-): EventRecord {
+): AssembledEventRecord {
   return {
     type: 'event',
     event: {
