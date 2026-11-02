@@ -12,7 +12,9 @@ test('客户端产物以 Harness classic-script 工厂注册', async () => {
   assert.equal(registration.id, 'dsh-image-iterate-plugin')
   assert.equal(typeof registration.factory, 'function')
 
-  const React = { createElement() {}, useEffect() {}, useState() { return [undefined, () => {}] } }
+  const React = {
+    createElement(type, props, ...children) { return { type, props, children } },
+  }
   const client = registration.factory((specifier) => {
     assert.equal(specifier, 'react')
     return React
@@ -20,10 +22,11 @@ test('客户端产物以 Harness classic-script 工厂注册', async () => {
   assert.deepEqual([...client.inject], ['slots'])
 
   const registrations = []
+  const injections = []
   const ctx = {
     slots: {
       inject(name, callback) {
-        assert.equal(name, 'tool.call.toolview')
+        injections.push(name)
         callback()
       },
       register(definition, component) {
@@ -32,8 +35,76 @@ test('客户端产物以 Harness classic-script 工厂注册', async () => {
     },
   }
   client.apply(ctx)
+  assert.deepEqual(injections, ['tool.call.toolview', 'image-iterate.tool.call.images'])
   assert.equal(registrations[0].definition.name, 'tool.call.toolview')
   assert.equal(registrations[0].definition.key, 'generate_image_with_review')
+  assert.equal(registrations[0].definition.children['image-iterate.tool.call.images'].kind, 'single')
+  assert.equal(registrations[0].definition.children['image-iterate.tool.call.images'].scope, 'session')
   assert.equal(typeof registrations[0].component, 'function')
-  assert.match(source, /图片附件暂时无法加载/)
+
+  const galleryCalls = []
+  const attachment = {
+    attachmentId: 'sha256:image', mediaType: 'image/png', bytes: 12, width: 3, height: 4, name: 'image.png',
+    originalDimensions: { width: 6, height: 8 },
+  }
+  registrations[0].component({
+    phase: 'result',
+    block: { isError: false, meta: { image: attachment }, content: [{ type: 'text', text: 'complete' }] },
+    loadImage: 'gateway-authorized-loader',
+    renderSlot(name, owner) {
+      galleryCalls.push({ name, owner })
+      return { gallery: true }
+    },
+  })
+  assert.equal(galleryCalls.length, 1)
+  assert.equal(galleryCalls[0].name, 'image-iterate.tool.call.images')
+  assert.equal(galleryCalls[0].owner.loadImage, 'gateway-authorized-loader')
+  assert.equal(galleryCalls[0].owner.align, 'start')
+  assert.deepEqual(JSON.parse(JSON.stringify(galleryCalls[0].owner.images)), [{ attachment }])
+
+  registrations[0].component({
+    phase: 'result',
+    block: {
+      isError: false,
+      meta: {
+        image: {
+          attachment_id: 'sha256:legacy-image',
+          media_type: 'image/jpeg',
+          bytes: 24,
+          width: 6,
+          height: 8,
+          name: 'legacy-image.jpg',
+        },
+      },
+      content: [],
+    },
+    loadImage: 'gateway-authorized-loader',
+    renderSlot(name, owner) {
+      galleryCalls.push({ name, owner })
+      return { gallery: true }
+    },
+  })
+  assert.deepEqual(JSON.parse(JSON.stringify(galleryCalls[1].owner.images)), [{
+    attachment: {
+      attachmentId: 'sha256:legacy-image',
+      mediaType: 'image/jpeg',
+      bytes: 24,
+      width: 6,
+      height: 8,
+      name: 'legacy-image.jpg',
+    },
+  }])
+
+  assert.equal(registrations[1].definition.name, 'image-iterate.tool.call.images')
+  assert.equal(registrations[1].definition.priority, 100)
+  const factoryCalls = []
+  registrations[1].component({
+    ...galleryCalls[0].owner,
+    renderFactorySlot(name, owner) {
+      factoryCalls.push({ name, owner })
+      return { gallery: true }
+    },
+  })
+  assert.equal(factoryCalls[0].name, 'conversation.images.content')
+  assert.deepEqual(JSON.parse(JSON.stringify(factoryCalls[0].owner)), JSON.parse(JSON.stringify(galleryCalls[0].owner)))
 })

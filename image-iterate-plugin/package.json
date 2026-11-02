@@ -33,12 +33,14 @@
     "client": {
       "inject": [
         "@deepseek-ai/dsh-client-ui-tool",
-        "@deepseek-ai/dsh-client-ui-conversation"
+        "@deepseek-ai/dsh-client-ui-conversation",
+        "@deepseek-ai/dsh-client-ui-attachment"
       ],
       "platform": "web"
     }
   },
   "scripts": {
-    "test": "node --test test/*.test.mjs"
+    "test": "node --test test/*.test.mjs",
+    "test:composition": "pnpm -C .. exec vitest run --config vitest.web.config.ts apps/web/tests/image-iterate-client.e2e.ts"
   }
 }

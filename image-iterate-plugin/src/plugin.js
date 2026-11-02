@@ -2,7 +2,12 @@ import Schema from '@deepseek-ai/schemastery'
 import { credentialRef, isCredentialRefName } from '@deepseek-ai/dsh-credentials'
 import { HarnessError } from '@deepseek-ai/dsh-llm'
 import { defineTool } from '@deepseek-ai/dsh-tools'
-import { ImageIterateError, generateAndReview } from './api.js'
+import {
+  IMAGE_GENERATION_OUTCOME_UNKNOWN,
+  IMAGE_GENERATION_OUTCOME_UNKNOWN_MESSAGE,
+  ImageIterateError,
+  generateAndReview,
+} from './api.js'
 
 export const name = 'image-iterate-plugin'
 export const inject = ['tools', 'attachments', 'credentials']
@@ -25,12 +30,20 @@ const imageSchema = {
   type: 'object',
   additionalProperties: false,
   properties: {
-    attachment_id: { type: 'string', required: true },
-    media_type: { type: 'string', required: true },
+    attachmentId: { type: 'string', required: true },
+    mediaType: { type: 'string', required: true },
     bytes: { type: 'integer', required: true },
     width: { type: 'integer', required: true },
     height: { type: 'integer', required: true },
-    name: { type: 'string', required: true },
+    name: { type: 'string' },
+    originalDimensions: {
+      type: 'object',
+      additionalProperties: false,
+      properties: {
+        width: { type: 'integer', required: true },
+        height: { type: 'integer', required: true },
+      },
+    },
   },
 }
 
@@ -80,28 +93,26 @@ function asHarnessError(error) {
         ? 'INVALID_CONFIG'
         : 'IMAGE_ITERATE_FAILED'
   const message = error instanceof Error ? error.message : '图像生成或审核未完成。'
-  return new HarnessError(message, code)
+  return new HarnessError(message, code, { cause: error })
 }
 
 function projectImage(ref) {
   return {
-    attachment_id: String(ref.attachmentId),
-    media_type: ref.mediaType,
+    attachmentId: String(ref.attachmentId),
+    mediaType: ref.mediaType,
     bytes: ref.bytes,
     width: ref.width,
     height: ref.height,
-    name: ref.name ?? 'generated-image.png',
+    ...(ref.name === undefined ? {} : { name: ref.name }),
+    ...(ref.originalDimensions === undefined
+      ? {}
+      : { originalDimensions: { ...ref.originalDimensions } }),
   }
 }
 
-function attachmentFrom(value) {
-  return {
-    attachmentId: value.attachment_id,
-    mediaType: value.media_type,
-    bytes: value.bytes,
-    width: value.width,
-    height: value.height,
-    name: value.name,
+class ImageGenerationOutcomeUnknownError extends HarnessError {
+  constructor(cause) {
+    super(IMAGE_GENERATION_OUTCOME_UNKNOWN_MESSAGE, IMAGE_GENERATION_OUTCOME_UNKNOWN, { cause })
   }
 }
 
@@ -123,7 +134,7 @@ export function apply(ctx, config) {
     presentResult: (_args, result) => {
       const image = result.meta?.image
       if (result.isError || image === undefined) return undefined
-      return { card: 'generic', content: [{ type: 'image', attachment: attachmentFrom(image) }] }
+      return { card: 'generic', content: [{ type: 'image', attachment: image }] }
     },
     async execute(args, exec) {
       try {
@@ -150,6 +161,7 @@ export function apply(ctx, config) {
           signal: exec.signal,
           timeoutMs: config.timeoutMs,
           fetchImpl: fetch,
+          imageOutcomeUnknown: cause => new ImageGenerationOutcomeUnknownError(cause),
           saveImage: async (image, iteration) => ctx.attachments.saveImage({
             data: image.bytes,
             mediaType: image.mimeType,

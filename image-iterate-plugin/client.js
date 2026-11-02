@@ -3,20 +3,36 @@ window.__ModuleLoader__.load({
   factory(require) {
     const React = require('react')
     const h = React.createElement
+    const imageSlot = 'image-iterate.tool.call.images'
 
     function attachmentFrom(meta) {
       if (typeof meta !== 'object' || meta === null) return undefined
       const image = meta.image
       if (typeof image !== 'object' || image === null) return undefined
-      if (typeof image.attachment_id !== 'string' || typeof image.media_type !== 'string') return undefined
-      if (!Number.isInteger(image.bytes) || !Number.isInteger(image.width) || !Number.isInteger(image.height)) return undefined
+      const attachmentId = typeof image.attachmentId === 'string' ? image.attachmentId : image.attachment_id
+      const mediaType = typeof image.mediaType === 'string' ? image.mediaType : image.media_type
+      if (typeof attachmentId !== 'string' || attachmentId === '' || typeof mediaType !== 'string' || mediaType === '') return undefined
+      if (!Number.isInteger(image.bytes) || image.bytes < 1
+        || !Number.isInteger(image.width) || image.width < 1
+        || !Number.isInteger(image.height) || image.height < 1) return undefined
+      let originalDimensions
+      if (image.originalDimensions !== undefined) {
+        if (typeof image.originalDimensions !== 'object' || image.originalDimensions === null
+          || !Number.isInteger(image.originalDimensions.width) || image.originalDimensions.width < 1
+          || !Number.isInteger(image.originalDimensions.height) || image.originalDimensions.height < 1) return undefined
+        originalDimensions = {
+          width: image.originalDimensions.width,
+          height: image.originalDimensions.height,
+        }
+      }
       return {
-        attachmentId: image.attachment_id,
-        mediaType: image.media_type,
+        attachmentId,
+        mediaType,
         bytes: image.bytes,
         width: image.width,
         height: image.height,
         ...(typeof image.name === 'string' ? { name: image.name } : {}),
+        ...(originalDimensions === undefined ? {} : { originalDimensions }),
       }
     }
 
@@ -28,40 +44,23 @@ window.__ModuleLoader__.load({
         .join('\n')
     }
 
-    function ImageResultRow({ phase, block, loadImage }) {
+    function ImageResultRow({ phase, block, loadImage, renderSlot }) {
       const attachment = phase === 'result' && !block.isError ? attachmentFrom(block.meta) : undefined
       const text = phase === 'result' ? textFrom(block) : ''
-      const [url, setUrl] = React.useState(undefined)
-      const [loadError, setLoadError] = React.useState(false)
-
-      React.useEffect(() => {
-        let active = true
-        setUrl(undefined)
-        setLoadError(false)
-        if (attachment === undefined) return () => { active = false }
-        loadImage(attachment).then(value => {
-          if (active) setUrl(value)
-        }, () => {
-          if (active) setLoadError(true)
-        })
-        return () => { active = false }
-      }, [attachment?.attachmentId, attachment?.mediaType, attachment?.bytes, attachment?.width, attachment?.height, loadImage])
-
       const children = text === '' ? [] : [h('pre', { key: 'output', style: { margin: 0, whiteSpace: 'pre-wrap' } }, text)]
-      if (attachment !== undefined && url !== undefined) {
-        children.push(h('img', {
-          key: 'image',
-          src: url,
-          alt: '',
-          width: attachment.width,
-          height: attachment.height,
-          style: { display: 'block', maxWidth: '100%', height: 'auto', marginTop: '8px' },
+      if (attachment !== undefined && typeof renderSlot === 'function') {
+        children.push(renderSlot(imageSlot, {
+          images: [{ attachment }],
+          loadImage,
+          align: 'start',
         }))
       }
-      if (attachment !== undefined && loadError) {
-        children.push(h('p', { key: 'image-load-error', role: 'status' }, '图片附件暂时无法加载。请重新打开会话或重新发起本次工具调用。'))
-      }
       return children.length === 0 ? null : h('div', null, ...children)
+    }
+
+    function ImageResultGallery({ images, loadImage, align, renderFactorySlot }) {
+      if (typeof renderFactorySlot !== 'function') return null
+      return renderFactorySlot('conversation.images.content', { images, loadImage, align })
     }
 
     return {
@@ -70,7 +69,12 @@ window.__ModuleLoader__.load({
         ctx.slots.inject('tool.call.toolview', () => ctx.slots.register({
           name: 'tool.call.toolview',
           key: 'generate_image_with_review',
+          children: { [imageSlot]: { kind: 'single', scope: 'session' } },
         }, ImageResultRow))
+        ctx.slots.inject(imageSlot, () => ctx.slots.register({
+          name: imageSlot,
+          priority: 100,
+        }, ImageResultGallery))
       },
     }
   },
