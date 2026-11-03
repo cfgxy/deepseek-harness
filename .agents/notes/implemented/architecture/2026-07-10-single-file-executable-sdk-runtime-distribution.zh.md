@@ -44,7 +44,7 @@ exe 的 VFS 内是**构建产物形态的真实包树**（各包的 `lib/` + 真
 
 部署根目录显式包含 `@deepseek-ai/dsh-mcp-client`，将其作为自定义配置可用的插件，即使随附 preset 均未挂载该插件。外部配置因此可以连接由用户提供的 stdio 与 Streamable HTTP MCP server 并注册其工具；分发物不包含这些 server。可选资源服务提供 MCP Resources；MCP Prompts 仍不受支持。可执行程序与已安装 wheel 包的冒烟测试会启动临时 stdio server，发现其工具，并完成一次由模型请求的调用。
 
-[Office kit](2026-09-14-independent-libreoffice-kit.zh.md) 及其已安装依赖树位于显式下载的 sidecar 的 `node_modules`，保留完整包内容与辅助程序权限。顶层 `pkg.ignore` 从 SEA 归档排除 kit 包，包括依赖 `files` 字段选中的资源；与其他使用方共享的小型依赖仍可在 VFS 中使用。Python 私有 bootstrap 使用 Node `registerHooks` 从真实目录解析 kit 入口及其包清单。因此原生可执行程序与 URL Worker 保留普通文件路径，无需修改 kit 或公开 CLI。构建将所选引擎和依赖位置锁定到确切的 npm 归档；下载会在发布缓存前校验完整性。
+[Office kit](2026-09-14-independent-libreoffice-kit.zh.md) 及其已安装依赖树位于显式下载的 sidecar 的 `node_modules`，保留完整包内容与辅助程序权限。顶层 `pkg.ignore` 从 SEA 归档排除 kit 包，包括依赖 `files` 字段选中的资源；与其他使用方共享的小型依赖仍可在 VFS 中使用。Python 私有 bootstrap 使用 Node `registerHooks` 从真实目录解析 kit 入口及其包清单。因此原生可执行程序与 URL Worker 保留普通文件路径，无需修改 kit 或公开 CLI。legacy deploy 会独立于共享锁解析该闭包的外部 semver 边，因此 deploy root 精确声明所得的 Office `tslib@2.9.1` 身份，并将其 SHA-512 保留在受审根锁中。构建将所选引擎和依赖位置锁定到确切的 npm 归档；下载会在发布缓存前校验完整性。
 
 ### 构建流水线与产物
 
