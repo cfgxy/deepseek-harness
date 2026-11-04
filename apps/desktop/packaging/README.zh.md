@@ -159,6 +159,10 @@ pnpm run package:desktop:win:x64:unsigned
 
 先运行 `pnpm install --frozen-lockfile`，再运行 `pnpm run package:desktop:win:x64:unsigned --check` 校验配置和工具，最后执行上面的完整命令。打包自行执行完整构建和隔离的运行时 smoke，不调用在线模型。阶段日志保留在 `.desktop-build/packaging-runs/`；仅构建成功不代表安装包验证通过。依赖安装和运行时准备需要访问 npm、GitHub release 资源和 nodejs.org；网络需要时使用现有 registry 和代理配置。缓存与工具位置属于构建机器配置，不在跟踪文件中固定个人路径。
 
+需要不使用凭据的内部测试安装包时，从 PR 分支 dispatch 默认分支已注册的 `Package Desktop · Windows · x64` workflow，并设置 `package_mode=hosted-unsigned`、`signing=unsigned`；其本地 reusable workflow 只运行在 GitHub-hosted `windows-2025`，接受源码分支或 tag 与可选构建版本，并固定传入 `--unsigned --hosted-unsigned`。它不选择机器 preset、不读取 `.env.windows`、不加载强制更新策略、不配置自动更新通道、不发布 Release，也不接收签名或上传凭据。
+
+运行成功后，下载 `windows-x64-hosted-unsigned-<version>-<run_id>-<run_attempt>`，其中仅有一个 `deepseek-harness-<version>-win-x64-unsigned.exe`；workflow 会记录其大小和 SHA256，它与诊断产物均保留 14 天。安装器使用独立的 `com.deepseek.harness.internal-test` 身份、`DeepSeek Harness Internal Test` 显示名且不注册 `dsh` protocol，不会替换正式安装。这是内部测试安装包，不是已签名发布包：Windows 可能显示未知发布者或 SmartScreen 警告。用于测试前，仍需分别检查运行记录、产物和安装结果。
+
 <a id="local-macos-dmg-without-release-signing"></a>
 
 ## 无发布签名的本地 macOS DMG

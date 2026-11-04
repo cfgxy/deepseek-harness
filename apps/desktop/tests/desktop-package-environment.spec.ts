@@ -2,7 +2,12 @@ import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
-import { loadDesktopPackageEnvironment, localMacOSPackageEnvironment, validateDesktopPackageEnvironment } from '../scripts/desktop-package-environment.mjs'
+import {
+  hostedWindowsUnsignedPackageEnvironment,
+  loadDesktopPackageEnvironment,
+  localMacOSPackageEnvironment,
+  validateDesktopPackageEnvironment,
+} from '../scripts/desktop-package-environment.mjs'
 import { resolveWindowsPackageSettings } from '../scripts/windows-package-settings.mjs'
 
 const WINDOWS = { platform: 'win32', arch: 'x64' } as const
@@ -119,6 +124,23 @@ describe('Desktop local packaging configuration', () => {
     expect(() => { validateDesktopPackageEnvironment(local, MACOS, { unsigned: true }) }).not.toThrow()
     expect(parent.DSH_DESKTOP_UNSIGNED).toBe('0')
     expect(parent.DSH_DESKTOP_APP_ID).toBe('com.example.release')
+  })
+
+  it('selects hosted Windows unsigned defaults without release, update, or signing settings', () => {
+    const parent = {
+      PATH: 'build-tools', HTTPS_PROXY: 'http://proxy.example:8080', DSH_DESKTOP_NPM_REGISTRY: 'https://registry.npmmirror.com',
+      DSH_DESKTOP_APP_ID: 'com.example.release', DSH_DESKTOP_AUTO_UPDATE_ENV: 'production',
+      DSH_DESKTOP_MANDATORY_UPDATE_CONFIG: 'invalid-json', DSH_DESKTOP_WINDOWS_TOKEN_PIN: 'token-secret',
+      DSH_DESKTOP_WINDOWS_CER_FILE: 'private.cer', CSC_LINK: 'private.pfx', DOWNLOAD_PROD_COS_SECRET_KEY: 'unused-secret',
+      DSH_PACKAGING_PRESET: 'production', DSH_PACKAGING_CONFIG_DIR: 'C:\\private-packaging',
+    }
+    const hosted = hostedWindowsUnsignedPackageEnvironment(parent)
+    expect(hosted).toEqual({
+      PATH: parent.PATH, HTTPS_PROXY: parent.HTTPS_PROXY, DSH_DESKTOP_NPM_REGISTRY: parent.DSH_DESKTOP_NPM_REGISTRY,
+      DSH_DESKTOP_APP_ID: 'com.deepseek.harness.internal-test', DSH_DESKTOP_HOSTED_UNSIGNED: '1', DSH_DESKTOP_UNSIGNED: '1',
+    })
+    expect(() => { validateDesktopPackageEnvironment(hosted, WINDOWS, { unsigned: true, hostedUnsigned: true }) }).not.toThrow()
+    expect(() => { validateDesktopPackageEnvironment(hosted, WINDOWS, { unsigned: true }) }).toThrow('DSH_DESKTOP_HOSTED_UNSIGNED')
   })
 
   it('takes cache concurrency from the Windows file and defaults to four without ambient overrides', async () => {

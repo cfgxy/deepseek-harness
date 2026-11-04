@@ -40,6 +40,8 @@ describe('desktop package target', () => {
     expect(parseDesktopPackageInvocation(['--prepare-only'], 'darwin', 'arm64').prepareOnly).toBe(true)
     expect(parseDesktopPackageInvocation(['--check'], 'darwin', 'arm64').check).toBe(true)
     expect(parseDesktopPackageInvocation(['win-x64', '--check', '--unsigned'], 'win32', 'x64')).toMatchObject({ check: true, unsigned: true })
+    expect(parseDesktopPackageInvocation(['win-x64', '--unsigned', '--hosted-unsigned'], 'win32', 'x64'))
+      .toMatchObject({ unsigned: true, hostedUnsigned: true })
     expect(() => parseDesktopPackageInvocation(['mac-arm64', 'mac-x64'], 'darwin', 'arm64'))
       .toThrow(/at most one target/u)
   })
@@ -85,6 +87,10 @@ describe('desktop package target', () => {
     }
     expect(() => parseDesktopPackageInvocation(['--unsigned', '--prepare-only'], 'win32', 'x64'))
       .toThrow(/cannot use --prepare-only/u)
+    expect(() => parseDesktopPackageInvocation(['win-x64', '--hosted-unsigned'], 'win32', 'x64'))
+      .toThrow(/requires --unsigned/u)
+    expect(() => parseDesktopPackageInvocation(['mac-arm64', '--unsigned', '--hosted-unsigned'], 'darwin', 'arm64'))
+      .toThrow(/requires --unsigned for win-x64/u)
   })
 
   it('removes ambient certificate inputs for unsigned builds and overrides an inherited signing mode', () => {
