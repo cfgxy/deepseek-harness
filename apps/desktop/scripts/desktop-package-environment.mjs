@@ -44,7 +44,7 @@ export function hostedWindowsUnsignedPackageEnvironment(environment = process.en
   return {
     ...Object.fromEntries(Object.entries(environment)
       .filter(([name]) => !AMBIENT_RELEASE_SETTING.test(name) && !HOSTED_UNSIGNED_EXCLUDED_SETTING.test(name))),
-    DSH_DESKTOP_APP_ID: 'com.deepseek.harness',
+    DSH_DESKTOP_APP_ID: 'com.deepseek.harness.internal-test',
     DSH_DESKTOP_HOSTED_UNSIGNED: '1',
     DSH_DESKTOP_UNSIGNED: '1',
   }

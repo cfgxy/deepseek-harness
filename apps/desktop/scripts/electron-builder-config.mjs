@@ -111,9 +111,10 @@ export function createElectronBuilderConfig(
   const buildVersion = resolveDesktopBuildVersion(env, productVersion)
   if (update?.channel === 'latest' && buildVersion.includes('-')) throw new Error('desktop package: latest requires a stable version')
   const packaged = resolveDesktopBuildCommit(env)
+  const productName = hostedUnsigned ? 'DeepSeek Harness Internal Test' : 'DeepSeek Harness'
   return {
     appId,
-    protocols: [{ name: 'DeepSeek Harness', schemes: ['dsh'] }],
+    protocols: hostedUnsigned ? [] : [{ name: 'DeepSeek Harness', schemes: ['dsh'] }],
     extraMetadata: {
       dshDesktopAppId: appId,
       ...(hostedUnsigned ? {} : { dshDesktopUpdateChannel: update?.channel ?? 'nightly' }),
@@ -121,7 +122,7 @@ export function createElectronBuilderConfig(
       ...buildVersion === productVersion ? {} : { version: buildVersion },
       ...packaged === undefined ? {} : { dshBuildCommit: packaged.commit, dshBuildDirty: packaged.dirty },
     },
-    productName: 'DeepSeek Harness',
+    productName,
     // The default copyright uses author.name; this line names the product instead.
     copyright: `Copyright © ${new Date().getFullYear()} \${productName}`,
     // Unsigned builds carry their own suffix so a shared file can never pass for a release artifact.

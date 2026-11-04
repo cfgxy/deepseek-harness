@@ -8,6 +8,12 @@ on:
         type: string
         default: master
         required: true
+      package_mode:
+        description: '构建路径：self-hosted-signed 保留既有机器签名流程；hosted-unsigned 仅构建内部测试未签名安装包'
+        type: choice
+        options: [self-hosted-signed, hosted-unsigned]
+        default: self-hosted-signed
+        required: true
       preset:
         description: '打包环境：选择机器上的 test 或 production 配置；同时决定后续发布环境'
         type: choice
@@ -63,6 +69,7 @@ concurrency:
 
 jobs:
   package:
+    if: inputs.package_mode == 'self-hosted-signed'
     runs-on: dsh-win-package-trial
     timeout-minutes: 120
     defaults:
@@ -215,3 +222,11 @@ jobs:
           path: ${{ steps.retained.outputs.directory }}/*
           if-no-files-found: error
           retention-days: 14
+
+  hosted-unsigned:
+    if: inputs.package_mode == 'hosted-unsigned'
+    uses: ./.github/workflows/windows-hosted-unsigned-package.yml
+    with:
+      source_ref: ${{ inputs.source_ref }}
+      build_version: ${{ inputs.build_version }}
+      signing: ${{ inputs.signing }}

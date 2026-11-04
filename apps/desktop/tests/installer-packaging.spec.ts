@@ -7,6 +7,10 @@ import { expandMacro } from 'app-builder-lib/out/util/macroExpander.js'
 import { describe, expect, it, vi } from 'vitest'
 
 const { execute, write } = vi.hoisted(() => ({ execute: vi.fn(async () => undefined), write: vi.fn(async () => undefined) }))
+const POLICY = {
+  DSH_DESKTOP_MANDATORY_UPDATE_TEST_ORIGIN: 'https://policy.example.com',
+  DSH_DESKTOP_MANDATORY_UPDATE_CONFIG: JSON.stringify({ allowedAuthOrigins: ['https://login.example.com'] }),
+}
 vi.mock('node:child_process', async (importOriginal) => {
   const original = await importOriginal<typeof import('node:child_process')>()
   const { promisify } = await import('node:util')
@@ -104,14 +108,23 @@ describe('installer preparation preserves application dependencies', () => {
 
   it('keeps hosted unsigned Windows packages free of update policy and update channel metadata', async () => {
     const { createElectronBuilderConfig } = await import('../scripts/electron-builder-config.mjs')
-    const config = createElectronBuilderConfig({
-      DSH_DESKTOP_APP_ID: 'com.deepseek.harness', DSH_DESKTOP_TARGET_PLATFORM: 'win32',
+    const hosted = createElectronBuilderConfig({
+      DSH_DESKTOP_APP_ID: 'com.deepseek.harness.internal-test', DSH_DESKTOP_TARGET_PLATFORM: 'win32',
       DSH_DESKTOP_TARGET_ARCH: 'x64', DSH_DESKTOP_UNSIGNED: '1', DSH_DESKTOP_HOSTED_UNSIGNED: '1',
     }, 'win32', 'x64')
-    expect(config.extraMetadata).toEqual(expect.objectContaining({ dshDesktopAppId: 'com.deepseek.harness' }))
-    expect(config.extraMetadata).not.toHaveProperty('dshMandatoryUpdatePolicy')
-    expect(config.extraMetadata).not.toHaveProperty('dshDesktopUpdateChannel')
-    expect(config.publish).toBeNull()
+    const ordinary = createElectronBuilderConfig({
+      DSH_DESKTOP_APP_ID: 'com.deepseek.harness', DSH_DESKTOP_TARGET_PLATFORM: 'win32',
+      DSH_DESKTOP_TARGET_ARCH: 'x64', DSH_DESKTOP_UNSIGNED: '1', ...POLICY,
+    }, 'win32', 'x64')
+    expect(hosted.extraMetadata).toEqual(expect.objectContaining({ dshDesktopAppId: 'com.deepseek.harness.internal-test' }))
+    expect(hosted.extraMetadata).not.toHaveProperty('dshMandatoryUpdatePolicy')
+    expect(hosted.extraMetadata).not.toHaveProperty('dshDesktopUpdateChannel')
+    expect(hosted.publish).toBeNull()
+    expect(hosted.productName).toBe('DeepSeek Harness Internal Test')
+    expect(hosted.protocols).toEqual([])
+    expect(ordinary.appId).toBe('com.deepseek.harness')
+    expect(ordinary.productName).toBe('DeepSeek Harness')
+    expect(ordinary.protocols).toEqual([{ name: 'DeepSeek Harness', schemes: ['dsh'] }])
   })
 
   it('rejects hosted unsigned mode outside the isolated unsigned Windows target', async () => {

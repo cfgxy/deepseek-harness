@@ -137,7 +137,7 @@ describe('Desktop local packaging configuration', () => {
     const hosted = hostedWindowsUnsignedPackageEnvironment(parent)
     expect(hosted).toEqual({
       PATH: parent.PATH, HTTPS_PROXY: parent.HTTPS_PROXY, DSH_DESKTOP_NPM_REGISTRY: parent.DSH_DESKTOP_NPM_REGISTRY,
-      DSH_DESKTOP_APP_ID: 'com.deepseek.harness', DSH_DESKTOP_HOSTED_UNSIGNED: '1', DSH_DESKTOP_UNSIGNED: '1',
+      DSH_DESKTOP_APP_ID: 'com.deepseek.harness.internal-test', DSH_DESKTOP_HOSTED_UNSIGNED: '1', DSH_DESKTOP_UNSIGNED: '1',
     })
     expect(() => { validateDesktopPackageEnvironment(hosted, WINDOWS, { unsigned: true, hostedUnsigned: true }) }).not.toThrow()
     expect(() => { validateDesktopPackageEnvironment(hosted, WINDOWS, { unsigned: true }) }).toThrow('DSH_DESKTOP_HOSTED_UNSIGNED')

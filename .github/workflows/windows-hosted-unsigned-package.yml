@@ -1,18 +1,21 @@
 name: Package Desktop · Windows · x64 · hosted unsigned
 
 on:
-  workflow_dispatch:
+  workflow_call:
     inputs:
       source_ref:
         description: '打包源码分支或 dsh-v* tag；只构建内部测试 unsigned 安装包'
         type: string
-        default: master
         required: true
       build_version:
         description: '可选构建版本；留空使用源码产品版本'
         type: string
         default: ''
         required: false
+      signing:
+        description: '只能是 unsigned；禁止由 GitHub-hosted job 请求签名'
+        type: string
+        required: true
 
 permissions:
   contents: read
@@ -32,6 +35,11 @@ jobs:
       DSH_TELEMETRY_DISABLED: '1'
       PACKAGE_SOURCE_REF: ${{ inputs.source_ref }}
     steps:
+      - name: Reject signing or publication requests
+        env:
+          PACKAGE_SIGNING: ${{ inputs.signing }}
+        run: |
+          if ($env:PACKAGE_SIGNING -ne 'unsigned') { throw 'Hosted packaging only accepts unsigned installers' }
       - uses: actions/checkout@v7.0.1
         id: checkout
         with:
@@ -67,12 +75,32 @@ jobs:
           path: apps/desktop/.desktop-build/packaging-runs/
           if-no-files-found: warn
           retention-days: 14
+      - name: Verify one unsigned installer and record its digest
+        if: success()
+        id: installer
+        run: |
+          $files = @(Get-ChildItem -LiteralPath 'apps/desktop/.desktop-build/targets/win-x64/unsigned-artifacts' -Filter '*-unsigned.exe' -File)
+          if ($files.Count -ne 1) { throw "Expected exactly one unsigned installer, found $($files.Count)" }
+          $file = $files[0]
+          $sha256 = (Get-FileHash -LiteralPath $file.FullName -Algorithm SHA256).Hash.ToLowerInvariant()
+          "path=$($file.FullName)" >> $env:GITHUB_OUTPUT
+          "name=$($file.Name)" >> $env:GITHUB_OUTPUT
+          "size_bytes=$($file.Length)" >> $env:GITHUB_OUTPUT
+          "sha256=$sha256" >> $env:GITHUB_OUTPUT
+          @(
+            '## Hosted unsigned installer',
+            '',
+            "- Source ref: $env:PACKAGE_SOURCE_REF",
+            "- File: $($file.Name)",
+            "- Size: $($file.Length) bytes",
+            "- SHA256: `$sha256`"
+          ) | Add-Content -LiteralPath $env:GITHUB_STEP_SUMMARY
       - name: Retain verified unsigned installer
         if: success()
         uses: actions/upload-artifact@v7.0.1
         with:
           name: windows-x64-hosted-unsigned-${{ steps.settings.outputs.version }}-${{ github.run_id }}-${{ github.run_attempt }}
           compression-level: 0
-          path: apps/desktop/.desktop-build/targets/win-x64/unsigned-artifacts/*-unsigned.exe
+          path: ${{ steps.installer.outputs.path }}
           if-no-files-found: error
           retention-days: 14
