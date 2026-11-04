@@ -1,0 +1,78 @@
+name: Package Desktop · Windows · x64 · hosted unsigned
+
+on:
+  workflow_dispatch:
+    inputs:
+      source_ref:
+        description: '打包源码分支或 dsh-v* tag；只构建内部测试 unsigned 安装包'
+        type: string
+        default: master
+        required: true
+      build_version:
+        description: '可选构建版本；留空使用源码产品版本'
+        type: string
+        default: ''
+        required: false
+
+permissions:
+  contents: read
+
+concurrency:
+  group: windows-hosted-unsigned-desktop-package
+  cancel-in-progress: false
+
+jobs:
+  package:
+    runs-on: windows-2025
+    timeout-minutes: 120
+    defaults:
+      run:
+        shell: pwsh
+    env:
+      DSH_TELEMETRY_DISABLED: '1'
+      PACKAGE_SOURCE_REF: ${{ inputs.source_ref }}
+    steps:
+      - uses: actions/checkout@v7.0.1
+        id: checkout
+        with:
+          persist-credentials: false
+          ref: ${{ inputs.source_ref }}
+      - uses: pnpm/action-setup@v5.0.0
+        with:
+          dest: ${{ runner.temp }}/setup-pnpm-${{ github.run_id }}-${{ github.run_attempt }}
+      - uses: actions/setup-node@v7.0.0
+        with:
+          node-version: '24'
+      - name: Install locked dependencies
+        run: pnpm install --frozen-lockfile
+      - name: Resolve build version
+        id: settings
+        env:
+          PACKAGE_BUILD_VERSION: ${{ inputs.build_version }}
+        run: |
+          $product = (Get-Content package.json -Raw | ConvertFrom-Json).version
+          $version = $env:PACKAGE_BUILD_VERSION.Trim()
+          if (-not $version) { $version = $product }
+          "version=$version" >> $env:GITHUB_OUTPUT
+      - name: Check hosted unsigned packaging configuration and toolchain
+        run: pnpm run package:desktop:win:x64 -- --check --unsigned --hosted-unsigned --build-version ${{ steps.settings.outputs.version }}
+      - name: Build unsigned installer and verify packaged runtime
+        run: pnpm run package:desktop:win:x64 -- --unsigned --hosted-unsigned --build-version ${{ steps.settings.outputs.version }}
+      - name: Retain packaging diagnostics
+        if: always() && steps.checkout.outcome == 'success'
+        uses: actions/upload-artifact@v7.0.1
+        with:
+          name: windows-hosted-unsigned-package-logs-${{ github.run_id }}-${{ github.run_attempt }}
+          include-hidden-files: true
+          path: apps/desktop/.desktop-build/packaging-runs/
+          if-no-files-found: warn
+          retention-days: 14
+      - name: Retain verified unsigned installer
+        if: success()
+        uses: actions/upload-artifact@v7.0.1
+        with:
+          name: windows-x64-hosted-unsigned-${{ steps.settings.outputs.version }}-${{ github.run_id }}-${{ github.run_attempt }}
+          compression-level: 0
+          path: apps/desktop/.desktop-build/targets/win-x64/unsigned-artifacts/*-unsigned.exe
+          if-no-files-found: error
+          retention-days: 14

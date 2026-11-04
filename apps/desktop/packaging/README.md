@@ -159,6 +159,10 @@ The command reads `.env.windows` and requires `DSH_DESKTOP_APP_ID` and the [mand
 
 Run `pnpm install --frozen-lockfile`, then `pnpm run package:desktop:win:x64:unsigned --check` to validate configuration and tooling before the full command above. Packaging performs its own complete build and isolated runtime smoke without an online model. Stage logs remain under `.desktop-build/packaging-runs/`; a successful build alone does not qualify the installer. Dependency installation and runtime preparation need access to npm, GitHub release assets and nodejs.org; use the existing registry and proxy configuration when the network requires it. Caches and tool locations belong to the build machine, not tracked personal paths.
 
+For a credential-free internal test package, use the separate `Package Desktop · Windows · x64 · hosted unsigned` manual workflow. It runs only on GitHub-hosted `windows-2025`, accepts a source branch or tag and an optional build version, and always passes `--unsigned --hosted-unsigned`. It does not select a machine preset, read `.env.windows`, load a mandatory-update policy, configure an automatic-update channel, publish a Release, or receive signing or upload credentials.
+
+After a successful run, download `windows-x64-hosted-unsigned-<version>-<run_id>-<run_attempt>` to obtain one `deepseek-harness-<version>-win-x64-unsigned.exe`; both it and its diagnostic artifact are retained for 14 days. This is an internal test package, not a signed release package: Windows can display an unknown-publisher or SmartScreen warning. Inspect the run, artifact, and installation separately before using it for testing.
+
 <a id="local-macos-dmg-without-release-signing"></a>
 
 ## Local macOS DMG without release signing

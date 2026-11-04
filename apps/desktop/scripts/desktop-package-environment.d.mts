@@ -8,6 +8,13 @@
 export function localMacOSPackageEnvironment(environment?: NodeJS.ProcessEnv): NodeJS.ProcessEnv
 
 /**
+ * Select the credential-free environment for the GitHub-hosted Windows internal-test installer.
+ * @param environment Parent environment, retained for build tools and networking.
+ * @returns Unsigned Windows environment without release, update, or signing settings.
+ */
+export function hostedWindowsUnsignedPackageEnvironment(environment?: NodeJS.ProcessEnv): NodeJS.ProcessEnv
+
+/**
  * Read a machine preset when selected, otherwise the target's required dotenv; no ambient release fallback.
  * PACKAGE_TEST_RELEASE_ID overrides the test preset only; blank retains its configured ID.
  * PACKAGE_MACOS_ZIP_COMPRESSION_LEVEL overrides the Mac file setting with 3 or 7; an empty value is invalid.
@@ -36,5 +43,5 @@ export function loadDesktopPackageEnvironment(
 export function validateDesktopPackageEnvironment(
   environment: NodeJS.ProcessEnv,
   target: { platform: 'win32' | 'darwin', arch: string },
-  options?: { unsigned?: boolean, prepareOnly?: boolean, skipNotarization?: boolean },
+  options?: { unsigned?: boolean, hostedUnsigned?: boolean, prepareOnly?: boolean, skipNotarization?: boolean },
 ): void

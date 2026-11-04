@@ -102,6 +102,30 @@ describe('installer preparation preserves application dependencies', () => {
     expect(config.artifactName).toBe('deepseek-harness-${version}-${os}-${arch}-unsigned.${ext}')
   })
 
+  it('keeps hosted unsigned Windows packages free of update policy and update channel metadata', async () => {
+    const { createElectronBuilderConfig } = await import('../scripts/electron-builder-config.mjs')
+    const config = createElectronBuilderConfig({
+      DSH_DESKTOP_APP_ID: 'com.deepseek.harness', DSH_DESKTOP_TARGET_PLATFORM: 'win32',
+      DSH_DESKTOP_TARGET_ARCH: 'x64', DSH_DESKTOP_UNSIGNED: '1', DSH_DESKTOP_HOSTED_UNSIGNED: '1',
+    }, 'win32', 'x64')
+    expect(config.extraMetadata).toEqual(expect.objectContaining({ dshDesktopAppId: 'com.deepseek.harness' }))
+    expect(config.extraMetadata).not.toHaveProperty('dshMandatoryUpdatePolicy')
+    expect(config.extraMetadata).not.toHaveProperty('dshDesktopUpdateChannel')
+    expect(config.publish).toBeNull()
+  })
+
+  it('rejects hosted unsigned mode outside the isolated unsigned Windows target', async () => {
+    const { createElectronBuilderConfig } = await import('../scripts/electron-builder-config.mjs')
+    expect(() => createElectronBuilderConfig({
+      DSH_DESKTOP_APP_ID: 'com.deepseek.harness', DSH_DESKTOP_TARGET_PLATFORM: 'win32',
+      DSH_DESKTOP_TARGET_ARCH: 'x64', DSH_DESKTOP_UNSIGNED: '0', DSH_DESKTOP_HOSTED_UNSIGNED: '1',
+    }, 'win32', 'x64')).toThrow('hosted unsigned mode requires an unsigned Windows target')
+    expect(() => createElectronBuilderConfig({
+      DSH_DESKTOP_APP_ID: 'com.deepseek.harness', DSH_DESKTOP_TARGET_PLATFORM: 'darwin',
+      DSH_DESKTOP_TARGET_ARCH: 'arm64', DSH_DESKTOP_UNSIGNED: '1', DSH_DESKTOP_HOSTED_UNSIGNED: '1',
+    }, 'darwin', 'arm64')).toThrow('hosted unsigned mode requires an unsigned Windows target')
+  })
+
   it('packages every preload entry point the shell loads', async () => {
     const { readdirSync, readFileSync } = await import('node:fs')
     const sourceDirectory = new URL('../src/', import.meta.url)
