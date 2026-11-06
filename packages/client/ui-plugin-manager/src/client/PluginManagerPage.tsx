@@ -634,7 +634,7 @@ function ItemDetail({ item, t, onBack, renderSlot, form }: {
           <h3 className={css.detailTitle}>{item.label}</h3>
           {renderSlot('plugins.detail.badge', { subject })}
         </div>
-        <p className={css.detailDesc}>{renderSlot('plugins.item', { view: 'summary' }, { only: item.id })}</p>
+        <div className={css.detailDesc}>{renderSlot('plugins.item', { view: 'summary' }, { only: item.id })}</div>
       </div>
       <div className={css.detailSections}>
         <section className={css.detailSection} data-plugin-config>

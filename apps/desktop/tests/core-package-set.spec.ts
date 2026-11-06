@@ -31,6 +31,7 @@ function packageSetProject(): {
   dsh: DesktopCorePackageRecord
   base: DesktopCorePackageRecord
   host: DesktopCorePackageRecord
+  imagePlugin: DesktopCorePackageRecord
 } {
   const root = mkdtempSync(join(tmpdir(), 'dsh-desktop-package-set-'))
   roots.push(root)
@@ -39,17 +40,20 @@ function packageSetProject(): {
   const dshBody = Buffer.from('dsh')
   const baseBody = Buffer.from('base')
   const hostBody = Buffer.from('host')
+  const imagePluginBody = Buffer.from('image plugin')
   const dsh = record('@deepseek-ai/dsh', 'dsh.tgz', dshBody)
   const base = record('@deepseek-ai/dsh-base', 'dsh-base.tgz', baseBody)
   const host = record('@deepseek-ai/dsh-desktop-host', 'dsh-desktop-host.tgz', hostBody)
+  const imagePlugin = record('dsh-image-iterate-plugin', 'dsh-image-iterate-plugin.tgz', imagePluginBody, '0.1.0')
   writeFileSync(join(packageDir, dsh.file), dshBody)
   writeFileSync(join(packageDir, base.file), baseBody)
   writeFileSync(join(packageDir, host.file), hostBody)
+  writeFileSync(join(packageDir, imagePlugin.file), imagePluginBody)
   writeFileSync(join(root, DESKTOP_PACKAGE_SET_FILE), `${JSON.stringify({
     schemaVersion: 1,
-    packages: [dsh, base, host],
+    packages: [dsh, base, host, imagePlugin],
   })}\n`)
-  return { root, dsh, base, host }
+  return { root, dsh, base, host, imagePlugin }
 }
 
 afterEach(() => {
@@ -65,17 +69,18 @@ describe('desktop core package set', () => {
       '@deepseek-ai/dsh': 'file:./desktop-packages/dsh.tgz',
       '@deepseek-ai/dsh-base': 'file:./desktop-packages/dsh-base.tgz',
       '@deepseek-ai/dsh-desktop-host': 'file:./desktop-packages/dsh-desktop-host.tgz',
+      'dsh-image-iterate-plugin': 'file:./desktop-packages/dsh-image-iterate-plugin.tgz',
     })
   })
 
   it('rejects version drift, descriptor disorder, corruption, and extra files', () => {
-    const { root, dsh, base, host } = packageSetProject()
+    const { root, dsh, base, host, imagePlugin } = packageSetProject()
     expect(() => verifyDesktopCorePackageSet(root, '2.0.0')).toThrow(/does not match Desktop/u)
     expect(() => parseDesktopCorePackageSet({
       schemaVersion: 1,
-      packages: [dsh, base, { ...host, version: '2.0.0' }],
+      packages: [dsh, base, { ...host, version: '2.0.0' }, imagePlugin],
     }, '1.2.3')).toThrow(/dsh-desktop-host@2\.0\.0 does not match Desktop 1\.2\.3/u)
-    expect(() => parseDesktopCorePackageSet({ schemaVersion: 1, packages: [base, dsh, host] }))
+    expect(() => parseDesktopCorePackageSet({ schemaVersion: 1, packages: [base, dsh, host, imagePlugin] }))
       .toThrow(/sorted by name/u)
     writeFileSync(join(root, DESKTOP_PACKAGES_DIR, dsh.file), 'changed')
     expect(() => verifyDesktopCorePackageSet(root, '1.2.3')).toThrow(/integrity check failed/u)
@@ -99,5 +104,12 @@ describe('desktop core package set', () => {
         packageSet,
       )
     }).toThrow(/outside the local package set/u)
+  })
+
+  it('keeps the independently versioned image plugin local without applying the Desktop release equality rule', () => {
+    const dsh = record('@deepseek-ai/dsh', 'dsh.tgz', Buffer.from('dsh'))
+    const host = record('@deepseek-ai/dsh-desktop-host', 'host.tgz', Buffer.from('host'))
+    const imagePlugin = record('dsh-image-iterate-plugin', 'image.tgz', Buffer.from('plugin'), '0.1.0')
+    expect(() => parseDesktopCorePackageSet({ schemaVersion: 1, packages: [dsh, host, imagePlugin] }, '1.2.3')).not.toThrow()
   })
 })

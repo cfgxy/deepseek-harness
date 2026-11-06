@@ -70,7 +70,7 @@ function ensureConfig(config) {
     throw new ImageIterateError('INVALID_CONFIG', 'outputFormat 仅支持 png、webp 或 jpeg。')
   }
   for (const field of ['imageBaseUrl', 'imageModel', 'imageCredential', 'reviewBaseUrl', 'reviewModel', 'reviewCredential']) {
-    if (config[field].trim() === '') throw new ImageIterateError('MISSING_CONFIG', `缺少 ${field} 配置。请在 profile 的 cordis.patch.yml 中设置它。`)
+    if (config[field].trim() === '') throw new ImageIterateError('MISSING_CONFIG', `缺少 ${field} 配置。请在 Desktop 的插件设置中填写，或在 profile 的 cordis.patch.yml 中设置它。`)
   }
 }
 

@@ -26,6 +26,13 @@ function release(version = '1.2.3'): DesktopRelease {
   }
 }
 
+function imagePlugin(root: string, version = '0.1.0'): string {
+  const directory = join(root, 'image-iterate-plugin')
+  mkdirSync(directory, { recursive: true })
+  writeFileSync(join(directory, 'package.json'), JSON.stringify({ name: 'dsh-image-iterate-plugin', version }))
+  return directory
+}
+
 afterEach(() => {
   for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true })
 })
@@ -46,7 +53,10 @@ describe('desktop development project', () => {
     writeFileSync(join(host, 'lib/index.js'), '')
     writeFileSync(join(dependency, 'package.json'), JSON.stringify({ name: 'unhoisted', version: '1.2.3' }))
     symlinkSync(dependency, join(cli, 'node_modules/unhoisted'), process.platform === 'win32' ? 'junction' : 'dir')
-    const project = prepareDevelopmentProject({ projectDir: join(root, 'runtime'), cliDir: cli, hostDir: host, dependencyDir: hoisted, release: release(), target: 'mac-arm64' })
+    const project = prepareDevelopmentProject({
+      projectDir: join(root, 'runtime'), cliDir: cli, hostDir: host, imagePluginDir: imagePlugin(root),
+      dependencyDir: hoisted, release: release(), target: 'mac-arm64',
+    })
     expect(realpathSync(join(project, 'node_modules/unhoisted'))).toBe(realpathSync(dependency))
     const descriptor = JSON.parse(readFileSync(join(project, 'desktop-runtime.json'), 'utf8')) as { platform: string; arch: string; sharedPackages: unknown[] }
     expect(descriptor).toMatchObject({ platform: 'darwin', arch: 'arm64' })
@@ -58,6 +68,7 @@ describe('desktop development project', () => {
     const cli = join(root, 'apps', 'cli')
     const host = join(root, 'apps', 'desktop-host')
     const dependencies = join(root, 'workspace-dependencies')
+    const plugin = imagePlugin(root)
     mkdirSync(join(cli, 'lib'), { recursive: true })
     mkdirSync(join(host, 'lib'), { recursive: true })
     mkdirSync(join(dependencies, '@scope'), { recursive: true })
@@ -75,12 +86,14 @@ describe('desktop development project', () => {
       projectDir: join(root, 'development'),
       cliDir: cli,
       hostDir: host,
+      imagePluginDir: plugin,
       dependencyDir: dependencies,
       release: release(),
       target: 'win-x64',
     })
     expect(realpathSync(join(project, 'node_modules', '@deepseek-ai', 'dsh'))).toBe(realpathSync(cli))
     expect(realpathSync(join(project, 'node_modules', '@deepseek-ai', 'dsh-desktop-host'))).toBe(realpathSync(host))
+    expect(realpathSync(join(project, 'node_modules', 'dsh-image-iterate-plugin'))).toBe(realpathSync(plugin))
     expect(realpathSync(join(project, 'node_modules', 'plain-dependency')))
       .toBe(realpathSync(join(dependencies, 'plain-dependency')))
     expect(realpathSync(join(project, 'node_modules', '@scope', 'dependency')))
@@ -90,8 +103,16 @@ describe('desktop development project', () => {
     }
     expect(manifest.dependencies['@deepseek-ai/dsh']).toBe('1.2.3')
     expect(manifest.dependencies['@deepseek-ai/dsh-desktop-host']).toBe('1.2.3')
-    const descriptor = JSON.parse(readFileSync(join(project, 'desktop-runtime.json'), 'utf8')) as { platform: string; arch: string }
+    expect(manifest.dependencies['dsh-image-iterate-plugin']).toBe('0.1.0')
+    const descriptor = JSON.parse(readFileSync(join(project, 'desktop-runtime.json'), 'utf8')) as {
+      platform: string
+      arch: string
+      sharedPackages: unknown[]
+    }
     expect(descriptor).toMatchObject({ platform: 'win32', arch: 'x64' })
+    expect(descriptor.sharedPackages).toContainEqual({
+      name: 'dsh-image-iterate-plugin', version: '0.1.0', path: 'node_modules/dsh-image-iterate-plugin',
+    })
     const manager = new DesktopProjectManager(resolveDesktopPaths(join(root, 'home')), {
       dsh: project,
     })
@@ -107,6 +128,7 @@ describe('desktop development project', () => {
     const cli = join(root, 'apps', 'cli')
     const host = join(root, 'apps', 'desktop-host')
     const dependencies = join(root, 'workspace-dependencies')
+    const plugin = imagePlugin(root)
     mkdirSync(join(cli, 'lib'), { recursive: true })
     mkdirSync(join(host, 'lib'), { recursive: true })
     mkdirSync(dependencies, { recursive: true })
@@ -117,9 +139,31 @@ describe('desktop development project', () => {
       projectDir: join(root, 'development'),
       cliDir: cli,
       hostDir: host,
+      imagePluginDir: plugin,
       dependencyDir: dependencies,
       release: release(),
       target: 'mac-x64',
     })).toThrow(/must be @deepseek-ai\/dsh@1\.2\.3/u)
+  })
+
+  it('rejects an invalid image plugin before replacing the development project', () => {
+    const root = temporaryRoot()
+    const cli = join(root, 'apps', 'cli')
+    const host = join(root, 'apps', 'desktop-host')
+    const dependencies = join(root, 'workspace-dependencies')
+    const plugin = join(root, 'image-iterate-plugin')
+    mkdirSync(join(cli, 'lib'), { recursive: true })
+    mkdirSync(join(host, 'lib'), { recursive: true })
+    mkdirSync(dependencies, { recursive: true })
+    mkdirSync(plugin)
+    writeFileSync(join(cli, 'package.json'), '{"name":"@deepseek-ai/dsh","version":"1.2.3"}\n')
+    writeFileSync(join(host, 'package.json'), '{"name":"@deepseek-ai/dsh-desktop-host","version":"1.2.3"}\n')
+    writeFileSync(join(host, 'lib', 'index.js'), '')
+    writeFileSync(join(plugin, 'package.json'), '{"name":"wrong-plugin","version":"0.1.0"}\n')
+
+    expect(() => prepareDevelopmentProject({
+      projectDir: join(root, 'development'), cliDir: cli, hostDir: host, imagePluginDir: plugin,
+      dependencyDir: dependencies, release: release(), target: 'mac-x64',
+    })).toThrow(/image plugin must be dsh-image-iterate-plugin/u)
   })
 })

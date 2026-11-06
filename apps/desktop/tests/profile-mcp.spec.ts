@@ -1,6 +1,6 @@
 /** MCP resource ownership in the shipped Desktop composition. */
 
-import { mkdtempSync, rmSync } from 'node:fs'
+import { mkdtempSync, readFileSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -27,6 +27,9 @@ it('retains one shared resource consumer in the Desktop Web profile', () => {
     expect(rows.filter(row => row.name === '@deepseek-ai/dsh-mcp-client')).toEqual([])
     expect(rows.find(row => row.id === 'webserver')).toMatchObject({ name: '@deepseek-ai/dsh-host-webserver' })
     expect(rows.find(row => row.id === 'webserver')?.disabled).not.toBe(true)
+    expect((JSON.parse(readFileSync(join(profileDir, 'package.json'), 'utf8')) as {
+      dsh: { profile: { bundles: string[] } }
+    }).dsh.profile.bundles).toContain('dsh-image-iterate-plugin')
     expect(warnings).toEqual([])
   } finally {
     rmSync(home, { recursive: true, force: true })
