@@ -6,6 +6,7 @@ import { join } from 'node:path'
 import { DESKTOP_HOST_RUNTIME_FILES, DESKTOP_PACKAGES_DIR } from '../src/core-package-set.ts'
 import {
   assertDesktopHostPackageFiles,
+  IMAGE_ITERATE_PACKAGE,
   prepareDesktopPackageSet,
   selectDesktopPackageClosure,
   type PackedDesktopPackage,
@@ -36,6 +37,9 @@ describe('desktop package-set selection', () => {
       ['@deepseek-ai/dsh-desktop-host', packed('@deepseek-ai/dsh-desktop-host', {
         dependencies: { '@deepseek-ai/dsh': '^1.0.0' },
       })],
+      [IMAGE_ITERATE_PACKAGE, packed(IMAGE_ITERATE_PACKAGE, {
+        peerDependencies: { '@deepseek-ai/dsh-base': '^1.0.0' },
+      })],
       ['@deepseek-ai/dsh-base', packed('@deepseek-ai/dsh-base', {
         peerDependencies: { '@deepseek-ai/cordis': '^1.0.0' },
       })],
@@ -49,6 +53,7 @@ describe('desktop package-set selection', () => {
       '@deepseek-ai/dsh-base',
       '@deepseek-ai/dsh-desktop-host',
       '@deepseek-ai/platform-package',
+      IMAGE_ITERATE_PACKAGE,
     ])
   })
 
@@ -62,11 +67,21 @@ describe('desktop package-set selection', () => {
       ['@deepseek-ai/dsh-desktop-host', packed('@deepseek-ai/dsh-desktop-host', {
         dependencies: { '@deepseek-ai/dsh': '^1.0.0' },
       })],
+      [IMAGE_ITERATE_PACKAGE, packed(IMAGE_ITERATE_PACKAGE)],
     ])
     expect(() => selectDesktopPackageClosure(available, { platform: 'win32', arch: 'x64' })).toThrow(/unpacked package/u)
     expect(() => selectDesktopPackageClosure(new Map([
       ['@deepseek-ai/dsh', packed('@deepseek-ai/dsh')],
     ]), { platform: 'win32', arch: 'x64' })).toThrow(/omit @deepseek-ai\/dsh-desktop-host/u)
+  })
+
+  it('rejects a missing shipped image plugin before packaging the runtime', () => {
+    const available = new Map<string, PackedDesktopPackage>([
+      ['@deepseek-ai/dsh', packed('@deepseek-ai/dsh')],
+      ['@deepseek-ai/dsh-desktop-host', packed('@deepseek-ai/dsh-desktop-host')],
+    ])
+    expect(() => selectDesktopPackageClosure(available, { platform: 'win32', arch: 'x64' }))
+      .toThrow(/omit dsh-image-iterate-plugin/u)
   })
 
   it('leaves independently published Office packages to npm resolution', () => {
@@ -78,9 +93,10 @@ describe('desktop package-set selection', () => {
         },
       })],
       ['@deepseek-ai/dsh-desktop-host', packed('@deepseek-ai/dsh-desktop-host')],
+      [IMAGE_ITERATE_PACKAGE, packed(IMAGE_ITERATE_PACKAGE)],
     ])
     expect(selectDesktopPackageClosure(available, { platform: 'win32', arch: 'x64' }).map(entry => entry.manifest.name)).toEqual([
-      '@deepseek-ai/dsh', '@deepseek-ai/dsh-desktop-host',
+      '@deepseek-ai/dsh', '@deepseek-ai/dsh-desktop-host', IMAGE_ITERATE_PACKAGE,
     ])
   })
 
@@ -104,6 +120,7 @@ const cuaBundle = '@deepseek-ai/dsh-cua-bundle'
 const targetManifests = () => new Map<string, PackedDesktopPackage>([
   ['@deepseek-ai/dsh', packed('@deepseek-ai/dsh', { dependencies: { [cuaBundle]: '1.0.0' } })],
   ['@deepseek-ai/dsh-desktop-host', packed('@deepseek-ai/dsh-desktop-host')],
+  [IMAGE_ITERATE_PACKAGE, packed(IMAGE_ITERATE_PACKAGE)],
   [cuaBundle, packed(cuaBundle, {
     optionalDependencies: { [macProvider]: '1.0.0' }, dependencies: { '@deepseek-ai/dsh-cua': '1.0.0' },
   })],
