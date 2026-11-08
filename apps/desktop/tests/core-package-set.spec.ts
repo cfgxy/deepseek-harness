@@ -88,10 +88,21 @@ describe('desktop core package set', () => {
     expect(() => verifyDesktopCorePackageSet(root, '1.2.3')).toThrow(/does not match its descriptor/u)
   })
 
+  it('requires the image plugin when both descriptor and tarball omit it', () => {
+    const { root, dsh, base, host, imagePlugin } = packageSetProject()
+    rmSync(join(root, DESKTOP_PACKAGES_DIR, imagePlugin.file))
+    writeFileSync(join(root, DESKTOP_PACKAGE_SET_FILE), `${JSON.stringify({
+      schemaVersion: 1,
+      packages: [dsh, base, host],
+    })}\n`)
+    expect(() => verifyDesktopCorePackageSet(root, '1.2.3')).toThrow(/missing dsh-image-iterate-plugin/u)
+  })
+
   it('rejects registry resolutions for names supplied by the local package set', () => {
     const dsh = record('@deepseek-ai/dsh', 'dsh.tgz', Buffer.from('dsh'))
     const host = record('@deepseek-ai/dsh-desktop-host', 'host.tgz', Buffer.from('host'))
-    const packageSet = parseDesktopCorePackageSet({ schemaVersion: 1, packages: [dsh, host] })
+    const imagePlugin = record('dsh-image-iterate-plugin', 'image.tgz', Buffer.from('plugin'), '0.1.0')
+    const packageSet = parseDesktopCorePackageSet({ schemaVersion: 1, packages: [dsh, host, imagePlugin] })
     expect(() => {
       verifyDesktopCoreLockfile(
         "packages:\n  '@deepseek-ai/dsh@file:desktop-packages/dsh.tgz':\n    resolution: {}\n",

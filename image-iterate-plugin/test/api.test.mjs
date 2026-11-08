@@ -96,6 +96,64 @@ test('视觉审核失败不将已生成图片标记为未知结果', async () =>
   assert.equal(calls, 2)
 })
 
+test('取消视觉审核会向上传播且不重试', async () => {
+  const controller = new AbortController()
+  let calls = 0
+  let reviewStarted
+  const reviewPending = new Promise(resolve => { reviewStarted = resolve })
+  const pending = generateAndReview(config(), { prompt: 'a square', acceptanceCriteria: 'blue' }, {
+    signal: controller.signal,
+    timeoutMs: 100,
+    fetchImpl: async (_url, init) => {
+      calls += 1
+      if (calls === 1) return response({ data: [{ b64_json: IMAGE }] })
+      reviewStarted()
+      return await new Promise((_resolve, reject) => {
+        init.signal.addEventListener('abort', () => reject(new Error('caller stopped')), { once: true })
+      })
+    },
+    saveImage: saveImage(),
+  })
+  await reviewPending
+  controller.abort(new Error('caller stopped'))
+  await assert.rejects(pending, error => error instanceof ImageIterateError
+    && error.code === 'CANCELLED'
+    && /视觉审核已取消/.test(error.message))
+  assert.equal(calls, 2)
+})
+
+test('审核 JSON 解析期间取消会向上传播且不重试', async () => {
+  const controller = new AbortController()
+  let calls = 0
+  let reviewJsonStarted
+  let resolveReviewJson
+  const reviewJsonPending = new Promise(resolve => { resolveReviewJson = resolve })
+  const reviewJsonStartedPending = new Promise(resolve => { reviewJsonStarted = resolve })
+  const pending = generateAndReview(config(), { prompt: 'a square', acceptanceCriteria: 'blue' }, {
+    signal: controller.signal,
+    timeoutMs: 100,
+    fetchImpl: async () => {
+      calls += 1
+      if (calls === 1) return response({ data: [{ b64_json: IMAGE }] })
+      return {
+        ok: true,
+        json: async () => {
+          reviewJsonStarted()
+          return await reviewJsonPending
+        },
+      }
+    },
+    saveImage: saveImage(),
+  })
+  await reviewJsonStartedPending
+  controller.abort(new Error('caller stopped'))
+  resolveReviewJson({ choices: [{ message: { content: '{"accepted":false,"feedback":"retry"}' } }] })
+  await assert.rejects(pending, error => error instanceof ImageIterateError
+    && error.code === 'CANCELLED'
+    && /视觉审核已取消/.test(error.message))
+  assert.equal(calls, 2)
+})
+
 test('图像响应缺少 b64_json 时标记为未知结果', async () => {
   let calls = 0
   await assert.rejects(() => generateImage(config().image, 'a square', {

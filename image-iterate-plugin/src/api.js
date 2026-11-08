@@ -42,16 +42,27 @@ async function requestJson(url, token, body, { signal, timeoutMs, fetchImpl, ima
       body: JSON.stringify(body),
       signal: controller.signal,
     })
+    if (signal?.aborted && imageRequest === undefined) {
+      throw new ImageIterateError('CANCELLED', '视觉审核已取消。')
+    }
     if (!response.ok) {
       throw new ImageIterateError('UPSTREAM_REJECTED', `上游请求被拒绝（HTTP ${response.status}）。请检查 endpoint、模型和凭据权限。`)
     }
+    let payload
     try {
-      return await response.json()
+      payload = await response.json()
     } catch (error) {
       if (imageRequest !== undefined) throw imageOutcomeUnknown({ imageOutcomeUnknown: imageRequest }, error)
       throw new ImageIterateError('INVALID_UPSTREAM_RESPONSE', '上游返回了非 JSON 响应。', { cause: error })
     }
+    if (signal?.aborted && imageRequest === undefined) {
+      throw new ImageIterateError('CANCELLED', '视觉审核已取消。')
+    }
+    return payload
   } catch (error) {
+    if (signal?.aborted && imageRequest === undefined) {
+      throw new ImageIterateError('CANCELLED', '视觉审核已取消。', { cause: error })
+    }
     if (error instanceof ImageIterateError) throw error
     if (error?.code === IMAGE_GENERATION_OUTCOME_UNKNOWN) throw error
     if (submitted) {
@@ -155,6 +166,7 @@ export async function generateAndReview(config, request, options) {
       review = await reviewImage(config.review, image, request.acceptanceCriteria, options)
     } catch (error) {
       if (error instanceof ImageIterateError) {
+        if (error.code === 'CANCELLED') throw error
         return { attachment, iteration, accepted: false, reviewStatus: 'review_unavailable', feedback: error.message }
       }
       throw error

@@ -2,7 +2,8 @@
 // The external image-review client bundle must travel through the same WebBootGraph
 // and ModuleLoader path as installed bundles. The fixture result carries the durable
 // tool metadata that the Host stores after the attachment save completes.
-import { resolve } from 'node:path'
+import { readFileSync } from 'node:fs'
+import { dirname, resolve } from 'node:path'
 import { fireEvent, screen, waitFor, within } from '@testing-library/react'
 import { expect, it } from 'vitest'
 import {
@@ -14,21 +15,50 @@ import type { AssembledEventRecord } from './assembled-remote.ts'
 
 installAssembledBootEnv()
 
-const imageReviewClient: AdditionalAssembledPlugin = {
-  id: 'dsh-image-iterate-plugin',
-  bundlePath: resolve(import.meta.dirname, '../../../image-iterate-plugin/client.js'),
-  url: 'plugins/dsh-image-iterate-plugin/client.js',
-  rev: 'fixture-image-iterate',
-  inject: [
-    '@deepseek-ai/dsh-client-ui-tool',
-    '@deepseek-ai/dsh-client-ui-conversation',
-    '@deepseek-ai/dsh-client-ui-attachment',
-    '@deepseek-ai/dsh-client-locale',
-    '@deepseek-ai/dsh-client-ui-settings',
-    '@deepseek-ai/dsh-client-ui-plugin-manager',
-    '@deepseek-ai/dsh-api-remotes',
-  ],
+interface ImageReviewManifest {
+  readonly name?: unknown
+  readonly exports?: { readonly './client'?: unknown }
+  readonly peerDependencies?: Record<string, unknown>
+  readonly dsh?: {
+    readonly client?: {
+      readonly platform?: unknown
+      readonly inject?: unknown
+    }
+  }
 }
+
+const imageReviewManifestPath = resolve(import.meta.dirname, '../../../image-iterate-plugin/package.json')
+
+function loadImageReviewClient(manifest: ImageReviewManifest): AdditionalAssembledPlugin {
+  const name = manifest.name
+  const clientExport = manifest.exports?.['./client']
+  const declaration = manifest.dsh?.client
+  if (typeof name !== 'string' || typeof clientExport !== 'string') {
+    throw new Error('image review plugin must publish a named ./client export')
+  }
+  if (declaration?.platform !== 'web') {
+    throw new Error('image review plugin client must declare the web platform')
+  }
+  if (!Array.isArray(declaration.inject) || !declaration.inject.every(dependency => typeof dependency === 'string')) {
+    throw new Error('image review plugin client must declare injected dependencies')
+  }
+  const publishedDependencies = manifest.peerDependencies ?? {}
+  const unpublishedDependency = declaration.inject.find(dependency => !(dependency in publishedDependencies))
+  if (unpublishedDependency !== undefined) {
+    throw new Error(`image review plugin inject dependency is not published: ${unpublishedDependency}`)
+  }
+  return {
+    id: name,
+    bundlePath: resolve(dirname(imageReviewManifestPath), clientExport),
+    url: `plugins/${name}/client.js`,
+    rev: 'fixture-image-iterate',
+    inject: declaration.inject,
+  }
+}
+
+const imageReviewClient = loadImageReviewClient(
+  JSON.parse(readFileSync(imageReviewManifestPath, 'utf8')) as ImageReviewManifest,
+)
 
 const attachment = {
   attachmentId: 'image-review-fixture',
@@ -193,6 +223,21 @@ async function openImageIterateSettings(): Promise<void> {
   fireEvent.click(within(card).getByRole('button', { name: /^View Image generation and review$/ }))
   await screen.findByLabelText('Image API base URL')
 }
+
+it('rejects inconsistent published client metadata before assembly', () => {
+  const manifest = JSON.parse(readFileSync(imageReviewManifestPath, 'utf8')) as ImageReviewManifest
+  expect(() => loadImageReviewClient({ ...manifest, exports: {} })).toThrow(/\.\/client export/u)
+  expect(() => loadImageReviewClient({
+    ...manifest,
+    dsh: { client: { ...manifest.dsh?.client, platform: 'desktop' } },
+  })).toThrow(/web platform/u)
+  const injected = manifest.dsh?.client?.inject
+  if (!Array.isArray(injected) || injected.length === 0 || typeof injected[0] !== 'string') {
+    throw new Error('image review plugin fixture is missing its published injection list')
+  }
+  const { [injected[0]]: _omitted, ...peerDependencies } = manifest.peerDependencies ?? {}
+  expect(() => loadImageReviewClient({ ...manifest, peerDependencies })).toThrow(/not published/u)
+})
 
 it('loads a persistent image-review attachment through the installed client bundle', async () => {
   const remote = mountAssembledApp({
