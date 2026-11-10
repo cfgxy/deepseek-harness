@@ -1542,6 +1542,12 @@ describe('Issue lifecycle workflow', () => {
     const handleStep = steps.find(s => s.name === 'Handle repository event')
     expect(tokenStep?.if).toBeUndefined()
     expect(handleStep?.if).toBeUndefined()
+    expect(tokenStep).toMatchObject({
+      with: {
+        owner: '${{ github.repository_owner }}',
+        repositories: '${{ github.event.repository.name }}',
+      },
+    })
 
     // issue-policy owns PR validation; it is read-only and a real gate.
     const policyPullRequest = workflowEvent(policy, 'pull_request')
@@ -1570,8 +1576,8 @@ describe('Issue lifecycle workflow', () => {
       with: {
         'client-id': '${{ vars.DSH_ISSUE_APP_CLIENT_ID }}',
         'private-key': '${{ secrets.DSH_ISSUE_APP_PRIVATE_KEY }}',
-        owner: 'deepseek-harness',
-        repositories: 'deepseek-harness',
+        owner: '${{ github.repository_owner }}',
+        repositories: '${{ github.event.repository.name }}',
         'permission-issues': 'read',
         'permission-organization-projects': 'read',
       },

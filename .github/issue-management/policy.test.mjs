@@ -23,6 +23,15 @@ import {
   validateIssue,
   validatePullRequest,
 } from './rules.mjs'
+import { repositoryContext } from './repository.mjs'
+
+const testRepository = 'deepseek-harness/deepseek-harness'
+const previousRepository = process.env.GITHUB_REPOSITORY
+process.env.GITHUB_REPOSITORY = testRepository
+test.after(() => {
+  if (previousRepository === undefined) delete process.env.GITHUB_REPOSITORY
+  else process.env.GITHUB_REPOSITORY = previousRepository
+})
 
 const projectGraphqlData = ({
   projectItem = true,
@@ -111,6 +120,33 @@ const mockGraphql = (t, resolve) => {
   })
   return requests
 }
+
+test('resolves repository API coordinates from the Actions context', async (t) => {
+  const previousRepository = process.env.GITHUB_REPOSITORY
+  const previousToken = process.env.GH_TOKEN
+  process.env.GITHUB_REPOSITORY = 'cfgxy/dsh-test'
+  process.env.GH_TOKEN = 'test-token'
+  t.after(() => {
+    if (previousRepository === undefined) delete process.env.GITHUB_REPOSITORY
+    else process.env.GITHUB_REPOSITORY = previousRepository
+    if (previousToken === undefined) delete process.env.GH_TOKEN
+    else process.env.GH_TOKEN = previousToken
+  })
+  t.mock.method(globalThis, 'fetch', async (url, options) => {
+    assert.equal(url, 'https://api.github.com/repos/cfgxy/dsh-test/pulls/10')
+    assert.equal(options.headers.Authorization, 'Bearer test-token')
+    return Response.json({ draft: true, user: { type: 'User' }, labels: [] })
+  })
+
+  assert.deepEqual(repositoryContext('cfgxy/dsh-test'), {
+    organization: 'cfgxy',
+    repository: 'dsh-test',
+    fullName: 'cfgxy/dsh-test',
+  })
+  assert.throws(() => repositoryContext('cfgxy/dsh-test/extra'), /owner\/repository/)
+  assert.throws(() => repositoryContext('cfgxy/dsh test'), /owner\/repository/)
+  assert.equal((await pullRequestSnapshot(10, false)).isDraft, true)
+})
 
 const legalIssue = {
   labels: [],
