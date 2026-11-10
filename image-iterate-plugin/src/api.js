@@ -150,29 +150,41 @@ function revisionPrompt(prompt, feedback) {
   return `${prompt}\n\n请根据以下审核反馈修改：${feedback}`
 }
 
+async function persistImage(options, image, iteration) {
+  if (options.signal?.aborted) {
+    throw new ImageIterateError('CANCELLED', '图像任务已取消，未持久化最终结果。', { cause: options.signal.reason })
+  }
+  // AttachmentStore has no delete/reclaim operation, so persistence is the commit point.
+  // A cancellation that races after this check must return the committed final result.
+  try {
+    return await options.saveImage(image, iteration)
+  } catch (error) {
+    if (error?.code === IMAGE_GENERATION_OUTCOME_UNKNOWN) throw error
+    throw imageOutcomeUnknown(options, error)
+  }
+}
+
 export async function generateAndReview(config, request, options) {
   let prompt = request.prompt
   for (let iteration = 1; iteration <= config.maxIterations; iteration += 1) {
     const image = await generateImage(config.image, prompt, options)
-    let attachment
-    try {
-      attachment = await options.saveImage(image, iteration)
-    } catch (error) {
-      if (error?.code === IMAGE_GENERATION_OUTCOME_UNKNOWN) throw error
-      throw imageOutcomeUnknown(options, error)
-    }
     let review
     try {
       review = await reviewImage(config.review, image, request.acceptanceCriteria, options)
     } catch (error) {
       if (error instanceof ImageIterateError) {
         if (error.code === 'CANCELLED') throw error
+        const attachment = await persistImage(options, image, iteration)
         return { attachment, iteration, accepted: false, reviewStatus: 'review_unavailable', feedback: error.message }
       }
       throw error
     }
-    if (review.accepted) return { attachment, iteration, accepted: true, reviewStatus: 'accepted', feedback: review.feedback }
+    if (review.accepted) {
+      const attachment = await persistImage(options, image, iteration)
+      return { attachment, iteration, accepted: true, reviewStatus: 'accepted', feedback: review.feedback }
+    }
     if (iteration === config.maxIterations) {
+      const attachment = await persistImage(options, image, iteration)
       return { attachment, iteration, accepted: false, reviewStatus: 'rejected_at_limit', feedback: review.feedback }
     }
     prompt = revisionPrompt(request.prompt, review.feedback)
