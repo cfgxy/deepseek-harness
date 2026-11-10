@@ -39,7 +39,8 @@ const VERSION_PATTERN = /^[0-9A-Za-z][0-9A-Za-z.+_-]*$/u
 const FILE_PATTERN = /^[a-zA-Z0-9][a-zA-Z0-9._-]*\.tgz$/u
 const INTEGRITY_PATTERN = /^sha512-[A-Za-z0-9+/]+={0,2}$/u
 const DSH_PACKAGE = '@deepseek-ai/dsh'
-const RELEASE_PACKAGES = [DSH_PACKAGE, DESKTOP_HOST_PACKAGE] as const
+const IMAGE_ITERATE_PLUGIN_PACKAGE = 'dsh-image-iterate-plugin'
+const RELEASE_PACKAGES = [DSH_PACKAGE, DESKTOP_HOST_PACKAGE, IMAGE_ITERATE_PLUGIN_PACKAGE] as const
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value)
@@ -86,7 +87,8 @@ export function parseDesktopCorePackageSet(
   for (const name of RELEASE_PACKAGES) {
     const entry = packages.find(candidate => candidate.name === name)
     if (entry === undefined) throw new Error(`desktop package set: missing ${name}`)
-    if (expectedReleaseVersion !== undefined && entry.version !== expectedReleaseVersion) {
+    if (expectedReleaseVersion !== undefined && name !== IMAGE_ITERATE_PLUGIN_PACKAGE
+      && entry.version !== expectedReleaseVersion) {
       throw new Error(`desktop package set: ${name}@${entry.version} does not match Desktop ${expectedReleaseVersion}`)
     }
   }

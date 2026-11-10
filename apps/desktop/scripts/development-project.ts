@@ -13,7 +13,7 @@ import {
   writeFileSync,
 } from 'node:fs'
 import { dirname, join } from 'node:path'
-import { createDevelopmentProjectMetadata } from '../src/project-manager.ts'
+import { createDevelopmentProjectMetadata, IMAGE_ITERATE_PACKAGE } from '../src/project-manager.ts'
 import type { DesktopRelease } from '../src/release.ts'
 import { DESKTOP_RUNTIME_FILE, type DesktopRuntimeDescriptor } from '../src/runtime-tree.ts'
 import type { DesktopAutoUpdateTarget } from './desktop-auto-update-environment.mjs'
@@ -33,6 +33,8 @@ export interface DevelopmentProjectOptions {
   readonly cliDir: string
   /** Current workspace's private Desktop Host application directory. */
   readonly hostDir: string
+  /** Root image-review plugin directory shipped in the Desktop profile. */
+  readonly imagePluginDir: string
   /** pnpm's workspace-wide virtual-hoist directory. */
   readonly dependencyDir: string
   /** Release identity written into the disposable project metadata. */
@@ -143,9 +145,13 @@ export function prepareDevelopmentProject(options: DevelopmentProjectOptions): s
   if (!existsSync(join(options.hostDir, 'lib', 'index.js'))) {
     throw new Error('desktop development: apps/desktop-host/lib/index.js is missing; run pnpm run build')
   }
+  const imagePluginManifest = readManifest(join(options.imagePluginDir, 'package.json'))
+  if (imagePluginManifest.name !== IMAGE_ITERATE_PACKAGE || typeof imagePluginManifest.version !== 'string') {
+    throw new Error(`desktop development: image plugin must be ${IMAGE_ITERATE_PACKAGE} with a version`)
+  }
 
   removeOwnedPath(options.projectDir)
-  createDevelopmentProjectMetadata(options.projectDir, options.release)
+  createDevelopmentProjectMetadata(options.projectDir, options.release, imagePluginManifest.version)
   const destinationModules = join(options.projectDir, 'node_modules')
   mkdirSync(destinationModules, { recursive: true })
   const names = [
@@ -158,7 +164,10 @@ export function prepareDevelopmentProject(options: DevelopmentProjectOptions): s
   const hostLink = join(destinationModules, '@deepseek-ai', 'dsh-desktop-host')
   removeOwnedPath(hostLink)
   linkDirectory(options.hostDir, hostLink)
-  const sharedPackages = [...new Set([...names, '@deepseek-ai/dsh', '@deepseek-ai/dsh-desktop-host'])].flatMap((name) => {
+  const imagePluginLink = join(destinationModules, IMAGE_ITERATE_PACKAGE)
+  removeOwnedPath(imagePluginLink)
+  linkDirectory(options.imagePluginDir, imagePluginLink)
+  const sharedPackages = [...new Set([...names, '@deepseek-ai/dsh', '@deepseek-ai/dsh-desktop-host', IMAGE_ITERATE_PACKAGE])].flatMap((name) => {
     const manifest = readManifest(join(destinationModules, name, 'package.json'))
     return typeof manifest.version === 'string' ? [{ name, version: manifest.version, path: `node_modules/${name}` }] : []
   })

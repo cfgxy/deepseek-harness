@@ -1,0 +1,19 @@
+# Bilingual-pair consistency record for README.md (docs/i18n/README.md): per heading
+# section, a hash of its English and Chinese blocks outside code blocks and generated regions.
+# After editing either side, bring the other along and re-record with:
+#   pnpm run verify-translation-pairing --write image-iterate-plugin/README.md
+/image-generation-and-review:
+  en: e6b4e5b719e6ba40
+  zh: 5a31403e116c0279
+/image-generation-and-review/desktop-setup:
+  en: e70227a98fba5c88
+  zh: bd463f4f77130c6d
+/image-generation-and-review/profile-configuration:
+  en: e9f5b225edb1b5ce
+  zh: 1baba70f9aa7e7d3
+/image-generation-and-review/failure-and-limits:
+  en: 9c8ea45525b59e97
+  zh: e9038745d61d666d
+/image-generation-and-review/verification:
+  en: 3aa1e8740bea79e8
+  zh: b5ec7c8068e1a04d

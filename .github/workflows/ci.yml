@@ -105,6 +105,9 @@ jobs:
           DSH_ARCHIVE_BASE_REF: ${{ github.event.pull_request.base.sha }}
         run: pnpm run check:ci:static
 
+      - name: Run image iterate plugin tests
+        run: pnpm --dir image-iterate-plugin test
+
   node-24-coverage:
     if: github.event_name == 'pull_request'
     runs-on: >-

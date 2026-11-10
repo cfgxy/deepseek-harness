@@ -93,7 +93,7 @@ jobs:
             "- Source ref: $env:PACKAGE_SOURCE_REF",
             "- File: $($file.Name)",
             "- Size: $($file.Length) bytes",
-            "- SHA256: `$sha256`"
+            "- SHA256: $sha256"
           ) | Add-Content -LiteralPath $env:GITHUB_STEP_SUMMARY
       - name: Retain verified unsigned installer
         if: success()
