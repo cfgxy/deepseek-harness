@@ -40,6 +40,9 @@
     },
     {
       "path": "../../subprocess/subprocess"
+    },
+    {
+      "path": "../image-iterate-plugin/tsconfig.host.json"
     }
   ]
 }

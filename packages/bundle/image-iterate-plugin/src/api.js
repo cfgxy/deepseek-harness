@@ -42,36 +42,24 @@ async function requestJson(url, token, body, { signal, timeoutMs, fetchImpl, ima
       body: JSON.stringify(body),
       signal: controller.signal,
     })
-    if (signal?.aborted && imageRequest === undefined) {
-      throw new ImageIterateError('CANCELLED', '视觉审核已取消。')
-    }
     if (!response.ok) {
       throw new ImageIterateError('UPSTREAM_REJECTED', `上游请求被拒绝（HTTP ${response.status}）。请检查 endpoint、模型和凭据权限。`)
     }
-    let payload
     try {
-      payload = await response.json()
+      return await response.json()
     } catch (error) {
       if (imageRequest !== undefined) throw imageOutcomeUnknown({ imageOutcomeUnknown: imageRequest }, error)
       throw new ImageIterateError('INVALID_UPSTREAM_RESPONSE', '上游返回了非 JSON 响应。', { cause: error })
     }
-    if (signal?.aborted && imageRequest === undefined) {
-      throw new ImageIterateError('CANCELLED', '视觉审核已取消。')
-    }
-    return payload
   } catch (error) {
-    if (signal?.aborted && imageRequest === undefined) {
-      throw new ImageIterateError('CANCELLED', '视觉审核已取消。', { cause: error })
-    }
     if (error instanceof ImageIterateError) throw error
     if (error?.code === IMAGE_GENERATION_OUTCOME_UNKNOWN) throw error
     if (submitted) {
       if (imageRequest !== undefined) throw imageOutcomeUnknown({ imageOutcomeUnknown: imageRequest }, error)
-      const reason = signal?.aborted
-        ? '视觉审核已取消'
-        : controller.signal.aborted
-          ? `视觉审核请求在 ${timeoutMs}ms 内未完成`
-          : '无法连接视觉审核上游'
+      if (signal?.aborted) throw new ImageIterateError('CANCELLED', '图像任务已取消。', { cause: error })
+      const reason = controller.signal.aborted
+        ? `视觉审核请求在 ${timeoutMs}ms 内未完成`
+        : '无法连接视觉审核上游'
       throw new ImageIterateError('UPSTREAM_OUTCOME_UNKNOWN', `${reason}。无法确认上游是否已接受请求，因此不会自动重试。`, { cause: error })
     }
     throw new ImageIterateError('UPSTREAM_UNREACHABLE', '无法连接图像或视觉审核上游。', { cause: error })
@@ -150,41 +138,36 @@ function revisionPrompt(prompt, feedback) {
   return `${prompt}\n\n请根据以下审核反馈修改：${feedback}`
 }
 
-async function persistImage(options, image, iteration) {
-  if (options.signal?.aborted) {
-    throw new ImageIterateError('CANCELLED', '图像任务已取消，未持久化最终结果。', { cause: options.signal.reason })
-  }
-  // AttachmentStore has no delete/reclaim operation, so persistence is the commit point.
-  // A cancellation that races after this check must return the committed final result.
-  try {
-    return await options.saveImage(image, iteration)
-  } catch (error) {
-    if (error?.code === IMAGE_GENERATION_OUTCOME_UNKNOWN) throw error
-    throw imageOutcomeUnknown(options, error)
-  }
+function isReviewUnavailable(error) {
+  return error.code === 'INVALID_REVIEW_RESPONSE'
+    || error.code === 'INVALID_UPSTREAM_RESPONSE'
+    || error.code === 'UPSTREAM_OUTCOME_UNKNOWN'
+    || error.code === 'UPSTREAM_REJECTED'
+    || error.code === 'UPSTREAM_UNREACHABLE'
 }
 
 export async function generateAndReview(config, request, options) {
   let prompt = request.prompt
   for (let iteration = 1; iteration <= config.maxIterations; iteration += 1) {
     const image = await generateImage(config.image, prompt, options)
+    let attachment
+    try {
+      attachment = await options.saveImage(image, iteration)
+    } catch (error) {
+      if (error?.code === IMAGE_GENERATION_OUTCOME_UNKNOWN) throw error
+      throw imageOutcomeUnknown(options, error)
+    }
     let review
     try {
       review = await reviewImage(config.review, image, request.acceptanceCriteria, options)
     } catch (error) {
-      if (error instanceof ImageIterateError) {
-        if (error.code === 'CANCELLED') throw error
-        const attachment = await persistImage(options, image, iteration)
+      if (error instanceof ImageIterateError && isReviewUnavailable(error)) {
         return { attachment, iteration, accepted: false, reviewStatus: 'review_unavailable', feedback: error.message }
       }
       throw error
     }
-    if (review.accepted) {
-      const attachment = await persistImage(options, image, iteration)
-      return { attachment, iteration, accepted: true, reviewStatus: 'accepted', feedback: review.feedback }
-    }
+    if (review.accepted) return { attachment, iteration, accepted: true, reviewStatus: 'accepted', feedback: review.feedback }
     if (iteration === config.maxIterations) {
-      const attachment = await persistImage(options, image, iteration)
       return { attachment, iteration, accepted: false, reviewStatus: 'rejected_at_limit', feedback: review.feedback }
     }
     prompt = revisionPrompt(request.prompt, review.feedback)

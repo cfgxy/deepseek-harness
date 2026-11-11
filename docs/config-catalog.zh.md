@@ -1890,6 +1890,43 @@ export interface TlsConfig {
 ```
 <!-- END GENERATED config-catalog:@deepseek-ai/dsh-host-webserver -->
 
+<!-- BEGIN GENERATED config-catalog:@deepseek-ai/dsh-image-iterate-plugin -->
+<a id="deepseek-aidsh-image-iterate-plugin"></a>
+
+## `@deepseek-ai/dsh-image-iterate-plugin`
+
+- `inject`: `tools` · `attachments` · `credentials`
+- `source`: [`packages/bundle/image-iterate-plugin/src/index.ts:20`](../packages/bundle/image-iterate-plugin/src/index.ts)
+
+```ts config-catalog
+/** Configuration for image generation and independent visual review requests. */
+export interface Config {
+  /** OpenAI-compatible base URL for `POST /images/generations`. */
+  imageBaseUrl: string
+  /** Image model name accepted by the configured image provider. */
+  imageModel: string
+  /** Environment variable or DSH credential reference for image requests. */
+  imageCredential: string
+  /** OpenAI-compatible base URL for `POST /chat/completions`. */
+  reviewBaseUrl: string
+  /** Vision model name accepted by the configured review provider. */
+  reviewModel: string
+  /** Environment variable or DSH credential reference for review requests. */
+  reviewCredential: string
+  /** Maximum number of paid image generations for one tool call. */
+  maxIterations: number
+  /** Per-request timeout in milliseconds. */
+  timeoutMs: number
+  /** Default image size passed to the image provider. */
+  defaultSize: string
+  /** Default image quality passed to the image provider. */
+  defaultQuality: string
+  /** Attachment format used for generated images. */
+  outputFormat: string
+}
+```
+<!-- END GENERATED config-catalog:@deepseek-ai/dsh-image-iterate-plugin -->
+
 <!-- BEGIN GENERATED config-catalog:@deepseek-ai/dsh-jobs-local -->
 <a id="deepseek-aidsh-jobs-local"></a>
 

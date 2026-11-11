@@ -1,0 +1,49 @@
+# Bilingual-pair consistency record for README.md (docs/i18n/README.md): per heading
+# section, a hash of its English and Chinese blocks outside code blocks and generated regions.
+# After editing either side, bring the other along and re-record with:
+#   pnpm run verify-translation-pairing --write packages/bundle/image-iterate-plugin/README.md
+/:
+  en: 730f4cb9d8e09c54
+  zh: 347877a5fef477f3
+/deepseek-ai-dsh-image-iterate-plugin:
+  en: 77227dd219e82212
+  zh: 69d96c6e6f204610
+/deepseek-ai-dsh-image-iterate-plugin/summary:
+  en: f3b75e2a7baa1625
+  zh: 925acda921768867
+/deepseek-ai-dsh-image-iterate-plugin/table-of-contents:
+  en: 6e364276d7c8b91a
+  zh: b9cd79054768d094
+/deepseek-ai-dsh-image-iterate-plugin/use-this-package:
+  en: c8b0c6b9fb3588f4
+  zh: 5732ff65293c1c10
+/deepseek-ai-dsh-image-iterate-plugin/configuration:
+  en: ee01820d9b99fb06
+  zh: 9fb550d71165e3cd
+/deepseek-ai-dsh-image-iterate-plugin/failure-and-cost-boundaries:
+  en: 4e38e4683aa7bff2
+  zh: 5a5a16d387db0619
+/deepseek-ai-dsh-image-iterate-plugin/verification:
+  en: 570fac0f9cfab1fc
+  zh: 47cb59ee03406c8f
+/deepseek-ai-dsh-image-iterate-plugin/model-experience:
+  en: 215e7ba838619b7b
+  zh: a311da3843709f90
+/deepseek-ai-dsh-image-iterate-plugin/model-experience/image-generation-and-review-tool:
+  en: fb30a8d64ffda736
+  zh: dbbed370a900b9d5
+/deepseek-ai-dsh-image-iterate-plugin/model-experience/image-generation-and-review-tool/what-the-model-sees:
+  en: 1ff099d3afa41971
+  zh: 33a6dd32bda91a4f
+/deepseek-ai-dsh-image-iterate-plugin/model-experience/image-generation-and-review-tool/token-effect:
+  en: 70a3e65ac6cc4689
+  zh: 66f589dcdf07c045
+/deepseek-ai-dsh-image-iterate-plugin/model-experience/image-generation-and-review-tool/kv-cache-effect:
+  en: eeaedeb3344420e0
+  zh: f8b42c861fa89abc
+/deepseek-ai-dsh-image-iterate-plugin/known-limitations-and-deferred-work:
+  en: 4d76c84e84ac08ac
+  zh: 4513af27b85cfcd3
+/deepseek-ai-dsh-image-iterate-plugin/known-limitations-and-deferred-work/dev-note:
+  en: a265d8d094617e7e
+  zh: 01d02e1336e2f8f0

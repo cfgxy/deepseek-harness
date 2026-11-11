@@ -57,6 +57,48 @@ describe('desktop package-set selection', () => {
     ])
   })
 
+  it('includes the built-in image plugin through the Web bundle dependency closure', () => {
+    const imagePlugin = '@deepseek-ai/dsh-image-iterate-plugin'
+    const available = new Map<string, PackedDesktopPackage>([
+      ['@deepseek-ai/dsh', packed('@deepseek-ai/dsh', {
+        dependencies: { '@deepseek-ai/dsh-web-app': '1.0.0' },
+      })],
+      ['@deepseek-ai/dsh-desktop-host', packed('@deepseek-ai/dsh-desktop-host', {
+        dependencies: { '@deepseek-ai/dsh': '1.0.0' },
+      })],
+      ['@deepseek-ai/dsh-web-app', packed('@deepseek-ai/dsh-web-app', {
+        dependencies: { [imagePlugin]: '1.0.0' },
+      })],
+      [imagePlugin, packed(imagePlugin, {
+        peerDependencies: {
+          '@deepseek-ai/cordis': '1.0.0',
+          '@deepseek-ai/dsh-attachment': '1.0.0',
+          '@deepseek-ai/dsh-credentials': '1.0.0',
+          '@deepseek-ai/dsh-llm': '1.0.0',
+          '@deepseek-ai/dsh-tools': '1.0.0',
+          '@deepseek-ai/schemastery': '1.0.0',
+        },
+      })],
+      ...[
+        '@deepseek-ai/cordis', '@deepseek-ai/dsh-attachment', '@deepseek-ai/dsh-credentials',
+        '@deepseek-ai/dsh-llm', '@deepseek-ai/dsh-tools', '@deepseek-ai/schemastery',
+      ].map(name => [name, packed(name)] as const),
+    ])
+    expect(selectDesktopPackageClosure(available, { platform: 'win32', arch: 'x64' }).map(entry => entry.manifest.name))
+      .toEqual([
+        '@deepseek-ai/cordis',
+        '@deepseek-ai/dsh',
+        '@deepseek-ai/dsh-attachment',
+        '@deepseek-ai/dsh-credentials',
+        '@deepseek-ai/dsh-desktop-host',
+        '@deepseek-ai/dsh-llm',
+        '@deepseek-ai/dsh-tools',
+        '@deepseek-ai/dsh-web-app',
+        '@deepseek-ai/dsh-image-iterate-plugin',
+        '@deepseek-ai/schemastery',
+      ].sort())
+  })
+
   it.each([
     '@deepseek-ai/dsh-base', '@deepseek-ai/cordis', '@deepseek-ai/node-addon-system',
   ])('rejects required prepared package %s absent from the packed release inputs', (dependency) => {
