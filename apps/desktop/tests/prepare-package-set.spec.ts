@@ -47,14 +47,15 @@ describe('desktop package-set selection', () => {
       ['@deepseek-ai/platform-package', packed('@deepseek-ai/platform-package')],
       ['@deepseek-ai/unused', packed('@deepseek-ai/unused')],
     ])
-    expect(selectDesktopPackageClosure(available, { platform: 'win32', arch: 'x64' }).map(entry => entry.manifest.name)).toEqual([
-      '@deepseek-ai/cordis',
-      '@deepseek-ai/dsh',
-      '@deepseek-ai/dsh-base',
-      '@deepseek-ai/dsh-desktop-host',
-      '@deepseek-ai/platform-package',
-      IMAGE_ITERATE_PACKAGE,
-    ])
+    expect(selectDesktopPackageClosure(available, { platform: 'win32', arch: 'x64' }).map(entry => entry.manifest.name))
+      .toEqual([
+        '@deepseek-ai/cordis',
+        '@deepseek-ai/dsh',
+        '@deepseek-ai/dsh-base',
+        '@deepseek-ai/dsh-desktop-host',
+        '@deepseek-ai/platform-package',
+        IMAGE_ITERATE_PACKAGE,
+      ].sort())
   })
 
   it('includes the built-in image plugin through the Web bundle dependency closure', () => {
@@ -123,7 +124,7 @@ describe('desktop package-set selection', () => {
       ['@deepseek-ai/dsh-desktop-host', packed('@deepseek-ai/dsh-desktop-host')],
     ])
     expect(() => selectDesktopPackageClosure(available, { platform: 'win32', arch: 'x64' }))
-      .toThrow(/omit dsh-image-iterate-plugin/u)
+      .toThrow(/omit @deepseek-ai\/dsh-image-iterate-plugin/u)
   })
 
   it('leaves independently published Office packages to npm resolution', () => {
