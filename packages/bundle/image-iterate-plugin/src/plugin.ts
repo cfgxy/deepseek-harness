@@ -11,9 +11,10 @@ import {
   generateAndReview,
 } from './api.ts'
 import type { Config } from './index.ts'
+import { capabilityConfig, ImageCapabilityError, resolveImageCapability } from './capability.ts'
 
 export const name = 'image-iterate-plugin'
-export const inject = ['tools', 'attachments', 'credentials']
+export const inject = ['tools', 'attachments', 'credentials', 'llm', 'userQuestions']
 
 type OutputFormat = 'png' | 'webp' | 'jpeg'
 
@@ -83,15 +84,13 @@ function ensureConfig(config: Config): OutputFormat {
   if (!['png', 'webp', 'jpeg'].includes(config.outputFormat)) {
     throw new ImageIterateError('INVALID_CONFIG', 'outputFormat 仅支持 png、webp 或 jpeg。')
   }
-  for (const [field, value] of [
-    ['imageBaseUrl', config.imageBaseUrl],
-    ['imageModel', config.imageModel],
-    ['imageCredential', config.imageCredential],
-    ['reviewBaseUrl', config.reviewBaseUrl],
-    ['reviewModel', config.reviewModel],
-    ['reviewCredential', config.reviewCredential],
-  ] as const) {
-    if (value.trim() === '') throw new ImageIterateError('MISSING_CONFIG', `缺少 ${field} 配置。请在 profile 的 cordis.patch.yml 中设置它。`)
+  const imageOverride = [config.imageBaseUrl, config.imageModel, config.imageCredential]
+  const reviewOverride = [config.reviewBaseUrl, config.reviewModel, config.reviewCredential]
+  for (const [role, values] of [['图像生成', imageOverride], ['视觉审核', reviewOverride]] as const) {
+    const configured = values.filter(value => value.trim() !== '').length
+    if (configured !== 0 && configured !== values.length) {
+      throw new ImageIterateError('INVALID_CONFIG', `${role} override 必须同时配置 endpoint、model 和 credential reference。`)
+    }
   }
   return config.outputFormat as OutputFormat
 }
@@ -175,7 +174,7 @@ function imageFromMeta(value: unknown): ImageAttachmentRef | undefined {
 export function apply(ctx: Context, config: Config): void {
   ctx.effect(() => ctx.tools.register(defineTool({
     name: 'generate_image_with_review',
-    description: 'Generate one image with the configured OpenAI-compatible Images API, review it against explicit acceptance criteria with the separately configured visual model, and retry only when that review rejects it. The configured limit prevents unbounded paid requests. Use this when the user asks to create an image and gives or can answer acceptance criteria.',
+    description: 'Generate one image through the current chat provider when it exposes a provider-owned image capability, review it against explicit acceptance criteria, and retry only when that review rejects it. Explicit endpoint/model/credential overrides remain available for advanced deployments; ask the user when capability selection is ambiguous. The configured limit prevents unbounded paid requests.',
     parameters: {
       prompt: { type: 'string', required: true, description: 'The complete image-generation prompt.' },
       acceptance_criteria: { type: 'string', required: true, description: 'Observable requirements the visual reviewer must check.' },
@@ -196,21 +195,48 @@ export function apply(ctx: Context, config: Config): void {
     async execute(args: ImageToolArgs, exec): Promise<ImageToolResult> {
       try {
         const outputFormat = ensureConfig(config)
-        const [imageToken, reviewToken] = await Promise.all([
-          resolveCredential(ctx, config.imageCredential, '图像生成'),
-          resolveCredential(ctx, config.reviewCredential, '视觉审核'),
-        ])
-        const result = await generateAndReview({
-          maxIterations: config.maxIterations,
-          image: {
+        const imageOverride = config.imageBaseUrl.trim() !== ''
+        const reviewOverride = config.reviewBaseUrl.trim() !== ''
+        const size = args.size ?? config.defaultSize
+        const quality = args.quality ?? config.defaultQuality
+        const automatic = imageOverride && reviewOverride
+          ? undefined
+          : exec.agent === undefined
+            ? (() => { throw new ImageCapabilityError('CAPABILITY_UNAVAILABLE', '当前工具调用没有可用的 agent，无法继承聊天 provider。') })()
+            : await resolveImageCapability(ctx, exec.agent, size, quality, exec.signal)
+        const resolvedSize = automatic?.size ?? size
+        const resolvedQuality = automatic?.quality ?? quality
+        if (resolvedSize.trim() === '' || resolvedQuality.trim() === '') {
+          throw new ImageIterateError('MISSING_CONFIG', '图像 size 和 quality 无法确定，请通过工具参数、插件默认值或用户问询提供。')
+        }
+        const selected = automatic === undefined
+          ? undefined
+          : capabilityConfig(automatic.capability, resolvedSize, resolvedQuality, outputFormat)
+        const image = imageOverride
+          ? {
             baseUrl: config.imageBaseUrl,
             model: config.imageModel,
-            token: imageToken,
-            size: args.size ?? config.defaultSize,
-            quality: args.quality ?? config.defaultQuality,
+            token: await resolveCredential(ctx, config.imageCredential, '图像生成'),
+            size: resolvedSize,
+            quality: resolvedQuality,
             outputFormat,
-          },
-          review: { baseUrl: config.reviewBaseUrl, model: config.reviewModel, token: reviewToken },
+          }
+          : selected === undefined
+            ? (() => { throw new ImageCapabilityError('CAPABILITY_UNAVAILABLE', '图像 capability 未解析。') })()
+            : selected.image
+        const review = reviewOverride
+          ? {
+            baseUrl: config.reviewBaseUrl,
+            model: config.reviewModel,
+            token: await resolveCredential(ctx, config.reviewCredential, '视觉审核'),
+          }
+          : selected === undefined
+            ? (() => { throw new ImageCapabilityError('CAPABILITY_UNAVAILABLE', '审核 capability 未解析。') })()
+            : selected.review
+        const result = await generateAndReview({
+          maxIterations: config.maxIterations,
+          image,
+          review,
         }, {
           prompt: args.prompt,
           acceptanceCriteria: args.acceptance_criteria,

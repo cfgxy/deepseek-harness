@@ -6,7 +6,7 @@ import type { SettingsFormLabels } from '@deepseek-ai/dsh-client-ui-primitives'
 export type ImageIterateSettingsLocaleKey =
   | 'title' | 'description'
   | 'imageBaseUrl' | 'imageModel' | 'imageCredential'
-  | 'reviewBaseUrl' | 'reviewModel' | 'reviewCredential'
+  | 'reviewBaseUrl' | 'reviewModel' | 'reviewCredential' | 'overrideHint'
   | 'imageSecret' | 'reviewSecret' | 'secretHint'
   | 'configured' | 'unconfigured' | 'credentialUnknown'
   | 'maxIterations' | 'timeoutMs' | 'defaultSize' | 'defaultQuality' | 'outputFormat'
@@ -15,9 +15,10 @@ export type ImageIterateSettingsLocaleKey =
 
 /** English copy. */
 export const en: Record<ImageIterateSettingsLocaleKey, string> = {
-  title: 'Image generation and review', description: 'Configure the image provider and visual review provider.',
-  imageBaseUrl: 'Image API base URL', imageModel: 'Image model', imageCredential: 'Image credential reference',
-  reviewBaseUrl: 'Review API base URL', reviewModel: 'Review model', reviewCredential: 'Review credential reference',
+  title: 'Image generation and review', description: 'The tool inherits the current chat provider when a provider-owned image capability is available. The fields below are advanced overrides.',
+  imageBaseUrl: 'Image override API base URL', imageModel: 'Image override model', imageCredential: 'Image override credential reference',
+  reviewBaseUrl: 'Review override API base URL', reviewModel: 'Review override model', reviewCredential: 'Review override credential reference',
+  overrideHint: 'Leave all override fields blank to inherit the current chat provider. Set endpoint, model, and credential reference together for an advanced override.',
   imageSecret: 'Image API key', reviewSecret: 'Review API key', secretHint: 'Stored outside the settings file. Leave blank to keep the current key.',
   configured: 'A key is configured.', unconfigured: 'No key is configured.', credentialUnknown: 'Credential status is unavailable.',
   maxIterations: 'Maximum iterations', timeoutMs: 'Request timeout (ms)', defaultSize: 'Default image size', defaultQuality: 'Default quality', outputFormat: 'Output format',
@@ -29,9 +30,10 @@ export const en: Record<ImageIterateSettingsLocaleKey, string> = {
 
 /** Simplified Chinese copy. */
 export const zh: Record<ImageIterateSettingsLocaleKey, string> = {
-  title: '图像生成与审核', description: '配置图像提供方和视觉审核提供方。',
-  imageBaseUrl: '图像 API 基础地址', imageModel: '图像模型', imageCredential: '图像凭据引用',
-  reviewBaseUrl: '审核 API 基础地址', reviewModel: '审核模型', reviewCredential: '审核凭据引用',
+  title: '图像生成与审核', description: '如果当前聊天 provider 提供受控图像能力，工具会自动继承；下方字段用于高级覆盖。',
+  imageBaseUrl: '图像覆盖 API 基础地址', imageModel: '图像覆盖模型', imageCredential: '图像覆盖凭据引用',
+  reviewBaseUrl: '审核覆盖 API 基础地址', reviewModel: '审核覆盖模型', reviewCredential: '审核覆盖凭据引用',
+  overrideHint: '全部覆盖字段留空时继承当前聊天 provider。高级覆盖必须同时填写 endpoint、model 和凭据引用。',
   imageSecret: '图像 API Key', reviewSecret: '审核 API Key', secretHint: '不写入设置文件。留空表示保持当前密钥。',
   configured: '已配置密钥。', unconfigured: '未配置密钥。', credentialUnknown: '无法读取凭据状态。',
   maxIterations: '最大迭代次数', timeoutMs: '请求超时（毫秒）', defaultSize: '默认图片尺寸', defaultQuality: '默认质量', outputFormat: '输出格式',

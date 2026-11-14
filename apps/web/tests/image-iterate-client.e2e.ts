@@ -226,7 +226,7 @@ async function openImageIterateSettings(): Promise<void> {
     return value
   })
   fireEvent.click(within(card).getByRole('button', { name: /^View Image generation and review$/ }))
-  await screen.findByLabelText('Image API base URL')
+  await screen.findByLabelText('Image override API base URL')
 }
 
 it('rejects inconsistent published client metadata before assembly', () => {
@@ -280,19 +280,30 @@ it('loads a persistent image-review attachment through the installed client bund
   })
 })
 
+it('shows current-provider inheritance when all overrides are blank', async () => {
+  mountAssembledApp({
+    remote: { imageIterate: {} },
+  })
+
+  await openImageIterateSettings()
+  expect(await screen.findByText('Leave all override fields blank to inherit the current chat provider. Set endpoint, model, and credential reference together for an advanced override.')).not.toBeNull()
+  expect((screen.getByLabelText('Image override API base URL') as HTMLInputElement).value).toBe('')
+  expect((screen.getByLabelText('Review override API base URL') as HTMLInputElement).value).toBe('')
+})
+
 it('saves image-provider settings separately from write-only credentials', async () => {
   const remote = mountAssembledApp({
     remote: { imageIterate: {} },
   })
 
   await openImageIterateSettings()
-  const imageBaseUrl = screen.getByLabelText('Image API base URL')
+  const imageBaseUrl = screen.getByLabelText('Image override API base URL')
   fireEvent.change(imageBaseUrl, { target: { value: 'https://images.example.test/v1' } })
-  fireEvent.change(screen.getByLabelText('Image model'), { target: { value: 'image-fixture' } })
-  fireEvent.change(screen.getByLabelText('Image credential reference'), { target: { value: 'IMAGE_FIXTURE_KEY' } })
-  fireEvent.change(screen.getByLabelText('Review API base URL'), { target: { value: 'https://review.example.test/v1' } })
-  fireEvent.change(screen.getByLabelText('Review model'), { target: { value: 'review-fixture' } })
-  fireEvent.change(screen.getByLabelText('Review credential reference'), { target: { value: 'REVIEW_FIXTURE_KEY' } })
+  fireEvent.change(screen.getByLabelText('Image override model'), { target: { value: 'image-fixture' } })
+  fireEvent.change(screen.getByLabelText('Image override credential reference'), { target: { value: 'IMAGE_FIXTURE_KEY' } })
+  fireEvent.change(screen.getByLabelText('Review override API base URL'), { target: { value: 'https://review.example.test/v1' } })
+  fireEvent.change(screen.getByLabelText('Review override model'), { target: { value: 'review-fixture' } })
+  fireEvent.change(screen.getByLabelText('Review override credential reference'), { target: { value: 'REVIEW_FIXTURE_KEY' } })
   fireEvent.change(screen.getByLabelText('Image API key'), { target: { value: 'test-image-secret' } })
   fireEvent.change(screen.getByLabelText('Review API key'), { target: { value: 'test-review-secret' } })
   fireEvent.click(screen.getByRole('button', { name: /^Save$/ }))
@@ -327,8 +338,8 @@ it('does not write credentials when the settings document rejects the ordinary f
     remote: { imageIterate: { mutationsAccepted: false } },
   })
   await openImageIterateSettings()
-  fireEvent.change(screen.getByLabelText('Image API base URL'), { target: { value: 'https://images.example.test/v1' } })
-  fireEvent.change(screen.getByLabelText('Image credential reference'), { target: { value: 'IMAGE_FIXTURE_KEY' } })
+  fireEvent.change(screen.getByLabelText('Image override API base URL'), { target: { value: 'https://images.example.test/v1' } })
+  fireEvent.change(screen.getByLabelText('Image override credential reference'), { target: { value: 'IMAGE_FIXTURE_KEY' } })
   const secret = screen.getByLabelText('Image API key')
   fireEvent.change(secret, { target: { value: 'preserved-secret' } })
   fireEvent.click(screen.getByRole('button', { name: /^Save$/ }))
@@ -346,7 +357,7 @@ it('keeps a secret draft when the credential store rejects it', async () => {
     remote: { imageIterate: { configuredCredentials: ['IMAGE_FIXTURE_KEY'], credentialsAccepted: false } },
   })
   await openImageIterateSettings()
-  fireEvent.change(screen.getByLabelText('Image credential reference'), { target: { value: 'IMAGE_FIXTURE_KEY' } })
+  fireEvent.change(screen.getByLabelText('Image override credential reference'), { target: { value: 'IMAGE_FIXTURE_KEY' } })
   await waitFor(() => {
     expect(screen.getByText('A key is configured.', { exact: true })).not.toBeNull()
   })
@@ -372,11 +383,11 @@ it('marks a replacement credential status unknown when its read is rejected', as
     },
   })
   await openImageIterateSettings()
-  fireEvent.change(screen.getByLabelText('Image credential reference'), { target: { value: 'OLD_IMAGE_FIXTURE_KEY' } })
+  fireEvent.change(screen.getByLabelText('Image override credential reference'), { target: { value: 'OLD_IMAGE_FIXTURE_KEY' } })
   await waitFor(() => {
     expect(screen.getByText('A key is configured.', { exact: true })).not.toBeNull()
   })
-  fireEvent.change(screen.getByLabelText('Image credential reference'), { target: { value: 'NEW_IMAGE_FIXTURE_KEY' } })
+  fireEvent.change(screen.getByLabelText('Image override credential reference'), { target: { value: 'NEW_IMAGE_FIXTURE_KEY' } })
 
   expect(await screen.findByText('Credential status is unavailable.', { exact: true })).not.toBeNull()
   expect(screen.queryByText('A key is configured.', { exact: true })).toBeNull()
@@ -387,7 +398,7 @@ it('clears a replacement credential while old and new status reads are pending',
     remote: { imageIterate: { configuredCredentials: ['OLD_IMAGE_FIXTURE_KEY'] } },
   })
   await openImageIterateSettings()
-  fireEvent.change(screen.getByLabelText('Image credential reference'), { target: { value: 'OLD_IMAGE_FIXTURE_KEY' } })
+  fireEvent.change(screen.getByLabelText('Image override credential reference'), { target: { value: 'OLD_IMAGE_FIXTURE_KEY' } })
   await waitFor(() => {
     expect(screen.getByText('A key is configured.', { exact: true })).not.toBeNull()
   })
@@ -400,7 +411,7 @@ it('clears a replacement credential while old and new status reads are pending',
   await waitFor(() => {
     expect(remote.mock.log.calls('credentials/describe')).toHaveLength(credentialDescriptionsBeforeRefresh + 1)
   })
-  fireEvent.change(screen.getByLabelText('Image credential reference'), { target: { value: 'NEW_IMAGE_FIXTURE_KEY' } })
+  fireEvent.change(screen.getByLabelText('Image override credential reference'), { target: { value: 'NEW_IMAGE_FIXTURE_KEY' } })
   await waitFor(() => {
     expect(remote.mock.log.calls('credentials/describe')).toHaveLength(credentialDescriptionsBeforeRefresh + 2)
   })
@@ -427,7 +438,7 @@ it('disables both secret controls while a credential write is pending', async ()
     remote: { imageIterate: { credentialSetDelayMs: 100 } },
   })
   await openImageIterateSettings()
-  fireEvent.change(screen.getByLabelText('Image credential reference'), { target: { value: 'IMAGE_FIXTURE_KEY' } })
+  fireEvent.change(screen.getByLabelText('Image override credential reference'), { target: { value: 'IMAGE_FIXTURE_KEY' } })
   const imageSecret = screen.getByLabelText('Image API key') as HTMLInputElement
   const reviewSecret = screen.getByLabelText('Review API key') as HTMLInputElement
   fireEvent.change(imageSecret, { target: { value: 'pending-secret' } })

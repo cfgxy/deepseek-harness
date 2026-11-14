@@ -42,11 +42,21 @@ export interface ImageGenerationConfig {
   outputFormat: 'png' | 'webp' | 'jpeg'
 }
 
+/** Provider-owned image generation closure; endpoint and credential stay with the provider. */
+export interface ImageGenerationCapability {
+  generate(prompt: string, signal?: AbortSignal): Promise<GeneratedImage>
+}
+
 /** Visual review request settings resolved by the Host plugin. */
 export interface ReviewConfig {
   baseUrl: string
   model: string
   token: string
+}
+
+/** Provider-owned visual review closure; endpoint and credential stay with the provider. */
+export interface ReviewCapability {
+  review(image: GeneratedImage, acceptanceCriteria: string, signal?: AbortSignal): Promise<ReviewResult>
 }
 
 /** One generated image before durable attachment storage. */
@@ -262,31 +272,53 @@ function isReviewUnavailable(error: ImageIterateError): boolean {
 
 /** Generate, persist, review, and revise within the configured paid-request limit. */
 export async function generateAndReview(
-  config: { maxIterations: number; image: ImageGenerationConfig; review: ReviewConfig },
+  config: {
+    maxIterations: number
+    image: ImageGenerationConfig | ImageGenerationCapability
+    review: ReviewConfig | ReviewCapability
+  },
   request: GenerateAndReviewRequest,
   options: ImageIterateOptions,
 ): Promise<GenerateAndReviewResult> {
-  let prompt = request.prompt
-  for (let iteration = 1; iteration <= config.maxIterations; iteration += 1) {
-    const image = await generateImage(config.image, prompt, options)
-    let attachment: SavedImageReference
+  const generate = (prompt: string): Promise<GeneratedImage> =>
+    'generate' in config.image
+      ? config.image.generate(prompt, options.signal)
+      : generateImage(config.image, prompt, options)
+  const reviewCandidate = (image: GeneratedImage): Promise<ReviewResult> =>
+    'review' in config.review
+      ? config.review.review(image, request.acceptanceCriteria, options.signal)
+      : reviewImage(config.review, image, request.acceptanceCriteria, options)
+  const persist = async (image: GeneratedImage, iteration: number): Promise<SavedImageReference> => {
+    if (options.signal?.aborted) {
+      throw new ImageIterateError('CANCELLED', '图像任务已取消，未持久化最终结果。', { cause: options.signal.reason })
+    }
     try {
-      attachment = await options.saveImage(image, iteration)
+      return await options.saveImage(image, iteration)
     } catch (error) {
       if (record(error)?.code === IMAGE_GENERATION_OUTCOME_UNKNOWN) throw error
       throw imageOutcomeUnknown(options, error)
     }
+  }
+
+  let prompt = request.prompt
+  for (let iteration = 1; iteration <= config.maxIterations; iteration += 1) {
+    const image = await generate(prompt)
     let review: ReviewResult
     try {
-      review = await reviewImage(config.review, image, request.acceptanceCriteria, options)
+      review = await reviewCandidate(image)
     } catch (error) {
       if (error instanceof ImageIterateError && isReviewUnavailable(error)) {
+        const attachment = await persist(image, iteration)
         return { attachment, iteration, accepted: false, reviewStatus: 'review_unavailable', feedback: error.message }
       }
       throw error
     }
-    if (review.accepted) return { attachment, iteration, accepted: true, reviewStatus: 'accepted', feedback: review.feedback }
+    if (review.accepted) {
+      const attachment = await persist(image, iteration)
+      return { attachment, iteration, accepted: true, reviewStatus: 'accepted', feedback: review.feedback }
+    }
     if (iteration === config.maxIterations) {
+      const attachment = await persist(image, iteration)
       return { attachment, iteration, accepted: false, reviewStatus: 'rejected_at_limit', feedback: review.feedback }
     }
     prompt = revisionPrompt(request.prompt, review.feedback)

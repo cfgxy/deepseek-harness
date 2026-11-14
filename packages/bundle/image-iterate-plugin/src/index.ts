@@ -10,25 +10,27 @@ import type { Context } from '@deepseek-ai/cordis'
 import z from '@deepseek-ai/schemastery'
 import { apply as applyPlugin } from './plugin.ts'
 
+export type { ImageCapability, ImageCapabilityRegistry } from './capability.ts'
+
 /** Stable Cordis plugin name. */
 export const name = 'image-iterate-plugin'
 
 /** Services used by the image tool implementation. */
-export const inject = ['tools', 'attachments', 'credentials']
+export const inject = ['tools', 'attachments', 'credentials', 'llm', 'userQuestions']
 
-/** Configuration for image generation and independent visual review requests. */
+/** Configuration for automatic provider-owned image capability selection and optional advanced overrides. */
 export interface Config {
-  /** OpenAI-compatible base URL for `POST /images/generations`. */
+  /** Optional advanced override endpoint for `POST /images/generations`; empty uses the current provider capability. */
   imageBaseUrl: string
-  /** Image model name accepted by the configured image provider. */
+  /** Optional advanced override image model. */
   imageModel: string
-  /** Environment variable or DSH credential reference for image requests. */
+  /** Optional environment variable or DSH credential reference for the image override. */
   imageCredential: string
-  /** OpenAI-compatible base URL for `POST /chat/completions`. */
+  /** Optional advanced override endpoint for `POST /chat/completions`; empty uses the current provider capability. */
   reviewBaseUrl: string
-  /** Vision model name accepted by the configured review provider. */
+  /** Optional advanced override vision model. */
   reviewModel: string
-  /** Environment variable or DSH credential reference for review requests. */
+  /** Optional environment variable or DSH credential reference for the review override. */
   reviewCredential: string
   /** Maximum number of paid image generations for one tool call. */
   maxIterations: number

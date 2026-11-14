@@ -9,7 +9,7 @@ English | [中文](README.zh.md)
 
 ## Summary
 
-This bundle adds a built-in `generate_image_with_review` tool to the Web/Desktop composition. It sends image requests to a configured OpenAI-compatible Images API, saves returned `b64_json` bytes through the Harness attachment service, asks an independently configured vision model to check explicit acceptance criteria, and generates again only when the review rejects the image within the configured limit. The package is registered by the shipped Web bundle, so users do not install it with `dsh plugin add`.
+This bundle adds a built-in `generate_image_with_review` tool to the Web/Desktop composition. It first reads the current chat provider/model and consumes provider-owned image-generation and visual-review closures; it regenerates only when review rejects the image within the configured limit. When capability metadata is missing or selection is ambiguous, the tool asks the user through `ctx.userQuestions.ask` instead of guessing from a model name. The package is registered by the shipped Web bundle, so users do not install it with `dsh plugin add`.
 
 ## Table of Contents
 
@@ -31,7 +31,7 @@ The Web/Desktop shipped bundle always includes the plugin row. Configure the exi
 <a id="configuration"></a>
 ## Configuration
 
-The default built-in row contains no endpoint, model, or credential values. An unconfigured installation still loads the plugin, and the first tool call returns `MISSING_CONFIG` instead of silently omitting the capability. Credential fields name POSIX environment variables or DSH credential references; they are not secret values.
+The default built-in row contains no endpoint, model, or credential values. An unconfigured installation still loads the plugin and first attempts to inherit the current chat provider. If that provider has no unique provider-owned image capability, the tool asks the user to clarify instead of guessing from a model name. Explicit endpoint, model, and credential references remain available as advanced overrides, and each role must be configured as a complete group. Credential fields name POSIX environment variables or DSH credential references; raw secrets remain owned by the provider or credential service and never enter ordinary settings or logs.
 
 ```yaml
 - id: image-iterate-plugin
@@ -50,7 +50,7 @@ The default built-in row contains no endpoint, model, or credential values. An u
     outputFormat: png
 ```
 
-The image and review credentials are resolved on every tool call, so credential rotation does not require a process restart. Keep the two references independent when image generation and visual review should have different access or audit scopes.
+In explicit override mode, image and review credentials are resolved on every tool call, so credential rotation does not require a process restart. Keep the two references independent when image generation and visual review should have different access or audit scopes. In automatic mode, the provider owns the endpoint and credential while the plugin receives only controlled closures.
 
 <a id="failure-and-cost-boundaries"></a>
 ## Failure and cost boundaries
@@ -59,7 +59,8 @@ The image and review credentials are resolved on every tool call, so credential 
 - Visual review uses OpenAI-compatible `POST /chat/completions` and requires JSON with `accepted` and `feedback` fields. Review timeout, network failure, or invalid JSON preserves the generated attachment and stops iteration.
 - Once an image POST has been sent, a disconnect, timeout, cancellation, non-JSON response, or invalid `b64_json` is reported as `IMAGE_GENERATION_OUTCOME_UNKNOWN`. The provider may have created and charged the image, so the plugin does not retry that request automatically.
 - `maxIterations` accepts only 1 through 3. When the limit is reached, the tool returns the last image and review feedback for a later user-directed call.
-- The plugin does not reuse the conversation model credential and does not treat ChatGPT OAuth, subscription benefits, or Luna Reserve as Images API access or quota.
+- Automatic inheritance uses only provider-declared capabilities; it never infers image support from a model name. An undeclared capability produces a diagnostic or a user question.
+- The plugin does not automatically treat ChatGPT OAuth, subscription benefits, or Luna Reserve as independent Images API access or quota; availability must be declared by a provider-owned capability.
 
 <a id="verification"></a>
 ## Verification

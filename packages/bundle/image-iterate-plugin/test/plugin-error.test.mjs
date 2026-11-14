@@ -11,7 +11,7 @@ class HarnessError extends Error {
   }
 }
 
-test('Host 工具将已发出图片 POST 的未知结果保留为可持久化 HarnessError', async () => {
+test('显式 image/review override 优先于自动 provider，并保留已发出图片 POST 的未知结果', async () => {
   const source = await readFile(new URL('../src/plugin.js', import.meta.url), 'utf8')
   const transformed = source
     .replace("import Schema from '@deepseek-ai/schemastery'", '')
@@ -19,6 +19,7 @@ test('Host 工具将已发出图片 POST 的未知结果保留为可持久化 Ha
     .replace("import { HarnessError } from '@deepseek-ai/dsh-llm'", '')
     .replace("import { defineTool } from '@deepseek-ai/dsh-tools'", '')
     .replace(/import \{[\s\S]*?\} from '\.\/api\.js'/, '')
+    .replace("import { capabilityConfig, ImageCapabilityError, resolveImageCapability } from './capability.js'", '')
     .replace('export const name', 'const name')
     .replace('export const inject', 'const inject')
     .replace('export const Config', 'const Config')

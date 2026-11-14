@@ -9,7 +9,7 @@ kind: "package-bundle"
 
 ## 概述
 
-本组合包为 Web/Desktop 组合提供内置的 `generate_image_with_review` 工具。它调用配置的 OpenAI-compatible Images API，使用 Harness attachment 服务保存返回的 `b64_json` 字节，再让独立配置的视觉模型按照显式验收标准检查图片；只有审核拒绝且未达到配置上限时才会再次生成。该 package 由随附的 Web bundle 注册，因此用户不需要执行 `dsh plugin add`。
+本组合包为 Web/Desktop 组合提供内置的 `generate_image_with_review` 工具。它优先读取当前聊天的 provider/model，并通过 provider-owned capability 获取受控的图像生成和视觉审核 closure；只有审核拒绝且未达到配置上限时才会再次生成。没有唯一 capability、能力元数据未知或关键参数无法确定时，工具会通过 `ctx.userQuestions.ask` 请求用户选择。该 package 由随附的 Web bundle 注册，因此用户不需要执行 `dsh plugin add`。
 
 ## 目录
 
@@ -31,7 +31,7 @@ kind: "package-bundle"
 <a id="configuration"></a>
 ## 配置
 
-默认内置配置项不包含 endpoint、model 或 credential 值。未配置的安装仍会加载插件，第一次工具调用会返回 `MISSING_CONFIG`，不会静默省略能力。credential 字段填写 POSIX 环境变量名或 DSH credential reference，不是密钥值。
+默认内置配置项不包含 endpoint、model 或 credential 值。未配置的安装仍会加载插件，工具会优先继承当前聊天 provider；如果该 provider 没有唯一的 provider-owned image capability，会通过用户问询澄清，而不是按模型名称猜测。显式 endpoint、model 和 credential reference 仍可作为高级覆盖，且每个覆盖角色必须成组填写。credential 字段填写 POSIX 环境变量名或 DSH credential reference，不是密钥值；原始密钥只由 provider 或 credential service 持有，不会进入普通 settings 或日志。
 
 ```yaml
 - id: image-iterate-plugin
@@ -50,7 +50,7 @@ kind: "package-bundle"
     outputFormat: png
 ```
 
-插件在每次工具调用时重新解析图像和审核凭据，因此凭据轮换无需重启进程。如果图像生成与视觉审核需要不同的访问权限或审计范围，应保持两个引用独立。
+显式覆盖模式下，插件在每次工具调用时重新解析图像和审核凭据，因此凭据轮换无需重启进程。如果图像生成与视觉审核需要不同的访问权限或审计范围，应保持两个引用独立。自动继承模式下，provider 负责 endpoint 和凭据，插件只接收受控 closure。
 
 <a id="failure-and-cost-boundaries"></a>
 ## 失败与费用边界
@@ -59,7 +59,8 @@ kind: "package-bundle"
 - 视觉审核使用 OpenAI-compatible `POST /chat/completions`，要求 JSON 中包含 `accepted` 与 `feedback` 字段。审核超时、网络失败或 JSON 无效时保留已生成的附件并停止迭代。
 - 图像 POST 发出后，如果连接中断、超时、取消、响应不是 JSON 或 `b64_json` 无效，会报告 `IMAGE_GENERATION_OUTCOME_UNKNOWN`。provider 可能已经生成并计费，因此插件不会自动重试该请求。
 - `maxIterations` 只接受 1 到 3。达到上限后，工具返回最后一张图片和审核反馈，用户可以之后主动发起新的调用。
-- 插件不会复用当前对话模型凭据，也不会把 ChatGPT OAuth、订阅权益或 Luna Reserve 当作 Images API 权限或额度。
+- 自动继承只使用 provider 明确注册的 capability，不根据模型名称推断图像能力；当前 provider 未声明 capability 时会返回诊断或发起问询。
+- 插件不会把 ChatGPT OAuth、订阅权益或 Luna Reserve 自动当作独立 Images API 权限或额度；是否可用由 provider-owned capability 明确声明。
 
 <a id="verification"></a>
 ## 验证

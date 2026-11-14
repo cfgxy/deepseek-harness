@@ -33,6 +33,7 @@ export function SettingsCard(props: ImageIterateSettingsCardProps) {
   )
   return (
     <SettingsForm labels={formLabels(t)} state={state} onSave={props.save} onDiscard={props.discard}>
+      <p>{t('overrideHint')}</p>
       {field('imageBaseUrl')}
       {field('imageModel')}
       {field('imageCredential')}

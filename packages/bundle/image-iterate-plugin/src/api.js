@@ -1,3 +1,5 @@
+import { Buffer } from 'node:buffer'
+
 export class ImageIterateError extends Error {
   constructor(code, message, options) {
     super(message, options)
@@ -8,6 +10,10 @@ export class ImageIterateError extends Error {
 
 export const IMAGE_GENERATION_OUTCOME_UNKNOWN = 'IMAGE_GENERATION_OUTCOME_UNKNOWN'
 export const IMAGE_GENERATION_OUTCOME_UNKNOWN_MESSAGE = '图像生成请求可能已被上游接受并产生计费，但结果无法确认。禁止自动重试；请先在上游控制台或账单记录中核对结果。'
+
+function record(value) {
+  return typeof value === 'object' && value !== null ? value : undefined
+}
 
 function imageOutcomeUnknown(options, cause) {
   if (options.imageOutcomeUnknown !== undefined) return options.imageOutcomeUnknown(cause)
@@ -22,18 +28,18 @@ function endpoint(baseUrl, path) {
   }
 }
 
-async function requestJson(url, token, body, { signal, timeoutMs, fetchImpl, imageOutcomeUnknown: imageRequest }) {
-  if (signal?.aborted) throw new ImageIterateError('CANCELLED', '图像任务已取消，未发起上游请求。')
+async function requestJson(url, token, body, options) {
+  if (options.signal?.aborted) throw new ImageIterateError('CANCELLED', '图像任务已取消，未发起上游请求。')
 
   const controller = new AbortController()
-  const abort = () => controller.abort(signal?.reason)
-  signal?.addEventListener('abort', abort, { once: true })
-  const timer = setTimeout(() => controller.abort(), timeoutMs)
+  const abort = () => controller.abort(options.signal?.reason)
+  options.signal?.addEventListener('abort', abort, { once: true })
+  const timer = setTimeout(() => controller.abort(), options.timeoutMs)
   let submitted = false
 
   try {
     submitted = true
-    const response = await fetchImpl(url, {
+    const response = await options.fetchImpl(url, {
       method: 'POST',
       headers: {
         authorization: `Bearer ${token}`,
@@ -48,24 +54,24 @@ async function requestJson(url, token, body, { signal, timeoutMs, fetchImpl, ima
     try {
       return await response.json()
     } catch (error) {
-      if (imageRequest !== undefined) throw imageOutcomeUnknown({ imageOutcomeUnknown: imageRequest }, error)
+      if (options.imageOutcomeUnknown !== undefined) throw imageOutcomeUnknown(options, error)
       throw new ImageIterateError('INVALID_UPSTREAM_RESPONSE', '上游返回了非 JSON 响应。', { cause: error })
     }
   } catch (error) {
     if (error instanceof ImageIterateError) throw error
-    if (error?.code === IMAGE_GENERATION_OUTCOME_UNKNOWN) throw error
+    if (record(error)?.code === IMAGE_GENERATION_OUTCOME_UNKNOWN) throw error
     if (submitted) {
-      if (imageRequest !== undefined) throw imageOutcomeUnknown({ imageOutcomeUnknown: imageRequest }, error)
-      if (signal?.aborted) throw new ImageIterateError('CANCELLED', '图像任务已取消。', { cause: error })
+      if (options.imageOutcomeUnknown !== undefined) throw imageOutcomeUnknown(options, error)
+      if (options.signal?.aborted) throw new ImageIterateError('CANCELLED', '图像任务已取消。', { cause: error })
       const reason = controller.signal.aborted
-        ? `视觉审核请求在 ${timeoutMs}ms 内未完成`
+        ? `视觉审核请求在 ${options.timeoutMs}ms 内未完成`
         : '无法连接视觉审核上游'
       throw new ImageIterateError('UPSTREAM_OUTCOME_UNKNOWN', `${reason}。无法确认上游是否已接受请求，因此不会自动重试。`, { cause: error })
     }
     throw new ImageIterateError('UPSTREAM_UNREACHABLE', '无法连接图像或视觉审核上游。', { cause: error })
   } finally {
     clearTimeout(timer)
-    signal?.removeEventListener('abort', abort)
+    options.signal?.removeEventListener('abort', abort)
   }
 }
 
@@ -81,18 +87,15 @@ function parseReview(value) {
   const content = typeof value === 'string' ? value.trim().replace(/^```(?:json)?\s*|\s*```$/g, '') : ''
   try {
     const parsed = JSON.parse(content)
-    if (typeof parsed.accepted !== 'boolean' || typeof parsed.feedback !== 'string') throw new TypeError('bad review')
-    return { accepted: parsed.accepted, feedback: parsed.feedback.trim() }
+    const object = record(parsed)
+    if (typeof object?.accepted !== 'boolean' || typeof object.feedback !== 'string') throw new TypeError('bad review')
+    return { accepted: object.accepted, feedback: object.feedback.trim() }
   } catch {
     throw new ImageIterateError('INVALID_REVIEW_RESPONSE', '视觉审核未返回 {"accepted": boolean, "feedback": string} JSON。')
   }
 }
 
 export async function generateImage(config, prompt, options) {
-  const imageRequestOptions = {
-    ...options,
-    imageOutcomeUnknown: cause => imageOutcomeUnknown(options, cause),
-  }
   try {
     const payload = await requestJson(endpoint(config.baseUrl, 'images/generations'), config.token, {
       model: config.model,
@@ -101,14 +104,19 @@ export async function generateImage(config, prompt, options) {
       size: config.size,
       quality: config.quality,
       output_format: config.outputFormat,
-    }, imageRequestOptions)
-    const image = payload?.data?.[0]?.b64_json
-    return { bytes: decodeImage(image), mimeType: `image/${config.outputFormat}` }
+    }, {
+      ...options,
+      imageOutcomeUnknown: cause => imageOutcomeUnknown(options, cause),
+    })
+    const data = record(payload)?.data
+    const first = Array.isArray(data) ? record(data[0]) : undefined
+    return { bytes: decodeImage(first?.b64_json), mimeType: `image/${config.outputFormat}` }
   } catch (error) {
-    if (error instanceof ImageIterateError && error.code === 'INVALID_UPSTREAM_RESPONSE') {
-      throw imageOutcomeUnknown(options, error)
+    if (error instanceof ImageIterateError
+      && ['CANCELLED', 'INVALID_CONFIG', 'IMAGE_GENERATION_OUTCOME_UNKNOWN', 'UPSTREAM_REJECTED'].includes(error.code)) {
+      throw error
     }
-    throw error
+    throw imageOutcomeUnknown(options, error)
   }
 }
 
@@ -130,8 +138,15 @@ export async function reviewImage(config, image, acceptanceCriteria, options) {
         ],
       },
     ],
-  }, { ...options, imageOutcomeUnknown: undefined })
-  return parseReview(payload?.choices?.[0]?.message?.content)
+  }, {
+    timeoutMs: options.timeoutMs,
+    fetchImpl: options.fetchImpl,
+    ...(options.signal === undefined ? {} : { signal: options.signal }),
+  })
+  const choices = record(payload)?.choices
+  const first = Array.isArray(choices) ? record(choices[0]) : undefined
+  const message = record(first?.message)
+  return parseReview(message?.content)
 }
 
 function revisionPrompt(prompt, feedback) {
@@ -147,27 +162,43 @@ function isReviewUnavailable(error) {
 }
 
 export async function generateAndReview(config, request, options) {
-  let prompt = request.prompt
-  for (let iteration = 1; iteration <= config.maxIterations; iteration += 1) {
-    const image = await generateImage(config.image, prompt, options)
-    let attachment
+  const generate = prompt => 'generate' in config.image
+    ? config.image.generate(prompt, options.signal)
+    : generateImage(config.image, prompt, options)
+  const reviewCandidate = image => 'review' in config.review
+    ? config.review.review(image, request.acceptanceCriteria, options.signal)
+    : reviewImage(config.review, image, request.acceptanceCriteria, options)
+  const persist = async (image, iteration) => {
+    if (options.signal?.aborted) {
+      throw new ImageIterateError('CANCELLED', '图像任务已取消，未持久化最终结果。', { cause: options.signal.reason })
+    }
     try {
-      attachment = await options.saveImage(image, iteration)
+      return await options.saveImage(image, iteration)
     } catch (error) {
-      if (error?.code === IMAGE_GENERATION_OUTCOME_UNKNOWN) throw error
+      if (record(error)?.code === IMAGE_GENERATION_OUTCOME_UNKNOWN) throw error
       throw imageOutcomeUnknown(options, error)
     }
+  }
+
+  let prompt = request.prompt
+  for (let iteration = 1; iteration <= config.maxIterations; iteration += 1) {
+    const image = await generate(prompt)
     let review
     try {
-      review = await reviewImage(config.review, image, request.acceptanceCriteria, options)
+      review = await reviewCandidate(image)
     } catch (error) {
       if (error instanceof ImageIterateError && isReviewUnavailable(error)) {
+        const attachment = await persist(image, iteration)
         return { attachment, iteration, accepted: false, reviewStatus: 'review_unavailable', feedback: error.message }
       }
       throw error
     }
-    if (review.accepted) return { attachment, iteration, accepted: true, reviewStatus: 'accepted', feedback: review.feedback }
+    if (review.accepted) {
+      const attachment = await persist(image, iteration)
+      return { attachment, iteration, accepted: true, reviewStatus: 'accepted', feedback: review.feedback }
+    }
     if (iteration === config.maxIterations) {
+      const attachment = await persist(image, iteration)
       return { attachment, iteration, accepted: false, reviewStatus: 'rejected_at_limit', feedback: review.feedback }
     }
     prompt = revisionPrompt(request.prompt, review.feedback)

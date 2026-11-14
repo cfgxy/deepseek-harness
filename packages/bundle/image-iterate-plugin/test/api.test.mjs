@@ -159,7 +159,7 @@ test('图像响应包含非法 b64_json 时标记为未知结果', async () => {
   assert.equal(calls, 1)
 })
 
-test('合法 base64 的非图片载荷在附件校验后仍标记为未知结果', async () => {
+test('合法 base64 的非图片载荷在最终附件校验失败后标记为未知结果', async () => {
   const attachmentError = Object.assign(new Error('Unsupported or malformed image data.'), { code: 'INVALID_IMAGE' })
   let calls = 0
   let saves = 0
@@ -167,7 +167,9 @@ test('合法 base64 的非图片载荷在附件校验后仍标记为未知结果
     timeoutMs: 100,
     fetchImpl: async () => {
       calls += 1
-      return response({ data: [{ b64_json: Buffer.from('not an image').toString('base64') }] })
+      return calls === 1
+        ? response({ data: [{ b64_json: Buffer.from('not an image').toString('base64') }] })
+        : response({ choices: [{ message: { content: '{"accepted":true,"feedback":"符合标准"}' } }] })
     },
     saveImage: async () => {
       saves += 1
@@ -177,7 +179,7 @@ test('合法 base64 的非图片载荷在附件校验后仍标记为未知结果
     && error.code === IMAGE_GENERATION_OUTCOME_UNKNOWN
     && error.cause === attachmentError
     && /禁止自动重试/.test(error.message))
-  assert.equal(calls, 1)
+  assert.equal(calls, 2)
   assert.equal(saves, 1)
 })
 
