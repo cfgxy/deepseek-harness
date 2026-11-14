@@ -1,13 +1,20 @@
-/** Render generated image attachments in the tool result through the shared image slot. */
+/** Browser-side settings page and tool result view for image generation and review. */
 import type { Context } from '@deepseek-ai/cordis'
+import type {} from '@deepseek-ai/dsh-api-remotes/client'
 import type { ImageAttachmentRef, ImageMediaType } from '@deepseek-ai/dsh-attachment'
+import type {} from '@deepseek-ai/dsh-client-locale/client'
 import type { MessageImageLoader } from '@deepseek-ai/dsh-client-ui-conversation/client'
+import type {} from '@deepseek-ai/dsh-client-ui-plugin-manager/client'
 import type {} from '@deepseek-ai/dsh-client-ui-renderer/client'
+import type {} from '@deepseek-ai/dsh-client-ui-settings/client'
 import type {} from '@deepseek-ai/dsh-client-ui-tool/client'
 import type { PropsRenderFactories } from '@deepseek-ai/dsh-client-ui-slots'
 import type { ReactNode } from 'react'
 import { createElement as h } from 'react'
 import type { ToolCallViewProps } from '@deepseek-ai/dsh-client-ui-tool/client'
+import { SettingsCard } from './SettingsCard.tsx'
+import { en, zh, type ImageIterateSettingsLocaleKey } from './locales.ts'
+import { IMAGE_ITERATE_NS, ImageIterateSettingsController } from './settings-card-controller.ts'
 
 type ImageToolViewProps = ToolCallViewProps & PropsRenderFactories
 
@@ -74,12 +81,33 @@ function ImageResultRow(props: ImageToolViewProps): ReactNode {
   return children.length === 0 ? null : h('div', null, ...children)
 }
 
-export const inject = ['slots']
+declare module '@deepseek-ai/dsh-client-ui-slots' {
+  interface LocaleNamespaceMap {
+    /** Image generation and review settings copy. */
+    'settings.imageIterate': ImageIterateSettingsLocaleKey
+  }
+}
 
-/** Register the image tool view; the shared gallery is rendered through its root Factory. */
+/** Dictionary namespace owned by this plugin. */
+export const NS = 'settings.imageIterate'
+
+/** Client services required by the settings page and tool result view. */
+export const inject = ['slots', 'locale', 'remote', 'remote.credentials', 'configForms']
+
+/** Register the image settings page and the persisted image result view. */
 export function apply(ctx: Context): void {
-  ctx.slots.inject('tool.call.toolview', () => ctx.slots.register({
-    name: 'tool.call.toolview',
-    key: 'generate_image_with_review',
-  }, ImageResultRow))
+  const t = ctx.locale.bind(NS)
+  ctx.effect(() => ctx.locale.register(NS, { en, zh }), 'image-iterate-plugin: dictionaries')
+  const card = new ImageIterateSettingsController(ctx.configForms.get(IMAGE_ITERATE_NS), ctx)
+  ctx.effect(() => () => { card.dispose() }, 'image-iterate-plugin: form subscription')
+  ctx.effect(
+    () => ctx.remote.$on('credentials/reference-updated', (ref) => { card.refreshCredential(ref) }),
+    'image-iterate-plugin: credential invalidations',
+  )
+  ctx.effect(() => ctx.configForms.whileServed([IMAGE_ITERATE_NS], () => ctx.slots.inject('plugins.item', () => ctx.slots.register({
+    name: 'plugins.item', id: 'image-iterate-plugin', order: 30, label: () => t('title'), locale: NS, inject: () => card.inject(),
+  }, SettingsCard))), 'image-iterate-plugin: page')
+  ctx.effect(() => ctx.slots.inject('tool.call.toolview', () => ctx.slots.register({
+    name: 'tool.call.toolview', key: 'generate_image_with_review',
+  }, ImageResultRow)), 'image-iterate-plugin: tool row')
 }

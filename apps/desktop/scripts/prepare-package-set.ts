@@ -28,7 +28,7 @@ import { tarballFiles } from '../../../scripts/release/tarball.ts'
 import { desktopTargetPlatform, resolveDesktopBuildTarget, resolveDesktopTargetBuildPaths } from './desktop-build-paths.mjs'
 
 const DSH_PACKAGE = '@deepseek-ai/dsh'
-export const IMAGE_ITERATE_PACKAGE = 'dsh-image-iterate-plugin'
+export const IMAGE_ITERATE_PACKAGE = '@deepseek-ai/dsh-image-iterate-plugin'
 const ROOT_PACKAGES = [DSH_PACKAGE, DESKTOP_HOST_PACKAGE, IMAGE_ITERATE_PACKAGE] as const
 const APP_ROOT = resolve(import.meta.dirname, '..')
 const REPOSITORY_ROOT = resolve(APP_ROOT, '..', '..')
