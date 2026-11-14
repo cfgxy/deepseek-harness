@@ -223,6 +223,13 @@
     - id: modules
       name: '@deepseek-ai/dsh-client-modules'
 
+    # Built-in image generation and visual review. The row is always present so
+    # the tool is available in Web/Desktop after installation; its empty
+    # configuration fails at the first tool call until the user supplies API
+    # endpoints, model names, and credential references in the profile patch.
+    - id: image-iterate-plugin
+      name: '@deepseek-ai/dsh-image-iterate-plugin'
+
     # Owns both ends of the web transport: node half binds the gateway to the
     # webserver under /api; browser half is the fetch/SSE client. Every API
     # request and upgrade passes the loopback, listener-bind, or trustedHosts

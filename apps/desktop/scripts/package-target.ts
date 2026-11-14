@@ -514,7 +514,7 @@ export async function packageTarget(
     ], buildEnv, REPOSITORY_ROOT)
     await executePreparation([
       '--dir',
-      'image-iterate-plugin',
+      'packages/bundle/image-iterate-plugin',
       'pack',
       '--pack-destination',
       buildPaths.packedImageIterate,

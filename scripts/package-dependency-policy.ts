@@ -71,6 +71,10 @@ const SAFE_HOST_DEPENDENCY_EXPORTS = {
 
 /** Runtime exports that require every consumer to resolve the provider's shared peer instance. */
 const PEER_REQUIRED_HOST_EXPORTS = {
+  // Image iteration shares the installed credential, error, and tool service instances.
+  '@deepseek-ai/dsh-credentials': ['credentialRef', 'isCredentialRefName'],
+  '@deepseek-ai/dsh-llm': ['HarnessError'],
+  '@deepseek-ai/dsh-tools': ['defineTool'],
   // Profile settings must match the installed Node provider's configuration schema.
   '@deepseek-ai/dsh-ptc-runtime-node/configuration': ['resolvePersistentExecution'],
   // CUA checks UserQuestionError and preserves AttachmentError from image admission.

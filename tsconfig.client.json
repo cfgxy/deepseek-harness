@@ -127,6 +127,7 @@
     { "path": "./packages/client/ui-reference" },
     { "path": "./packages/client/ui-secret-mask" },
     { "path": "./packages/client/ui-subagent" },
+    { "path": "./packages/bundle/image-iterate-plugin/tsconfig.client.json" },
     { "path": "./packages/experimental/client-ui-agent-team" },
     { "path": "./packages/experimental/client-ui-stats" },
     { "path": "./packages/client/ui-dockkit" },

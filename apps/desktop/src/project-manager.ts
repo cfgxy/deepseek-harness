@@ -28,7 +28,7 @@ import { PROFILE_TEMPLATES, type ProfileTemplate } from '@deepseek-ai/dsh-offici
 const PROJECT_NAME = '@deepseek-ai/dsh-desktop-runtime'
 const DSH_PACKAGE = '@deepseek-ai/dsh'
 const CORE_BUILD_PACKAGE = '@deepseek-ai/dsh-subprocess-local'
-export const IMAGE_ITERATE_PACKAGE = 'dsh-image-iterate-plugin'
+export const IMAGE_ITERATE_PACKAGE = '@deepseek-ai/dsh-image-iterate-plugin'
 const WEB_PROFILE = PROFILE_TEMPLATES.web as ProfileTemplate
 const DESKTOP_BUNDLES = [...WEB_PROFILE.bundles, IMAGE_ITERATE_PACKAGE]
 const WORKSPACE_SETTINGS = 'nodeLinker: hoisted\nautoInstallPeers: false\n'

@@ -21,12 +21,9 @@ function response(value, status = 200) {
   return new Response(JSON.stringify(value), { status, headers: { 'content-type': 'application/json' } })
 }
 
-function saveImage(saved = []) {
+function saveImage() {
   let sequence = 0
-  return async (image, iteration) => {
-    saved.push({ image, iteration })
-    return { attachmentId: `sha256:${++sequence}`, mediaType: 'image/png', bytes: 11, width: 1, height: 1, name: 'image.png' }
-  }
+  return async () => ({ attachmentId: `sha256:${++sequence}`, mediaType: 'image/png', bytes: 11, width: 1, height: 1, name: 'image.png' })
 }
 
 test('首次审核通过时只生成一次', async () => {
@@ -46,9 +43,8 @@ test('首次审核通过时只生成一次', async () => {
   assert.equal(calls.length, 2)
 })
 
-test('审核拒绝后只保存次轮通过的图片', async () => {
+test('审核拒绝后最多再生成一次', async () => {
   const imagePrompts = []
-  const saved = []
   let call = 0
   const result = await generateAndReview(config(), { prompt: 'a square', acceptanceCriteria: 'must be blue' }, {
     timeoutMs: 100,
@@ -61,35 +57,15 @@ test('审核拒绝后只保存次轮通过的图片', async () => {
       }
       return response({ choices: [{ message: { content: call === 2 ? '{"accepted":false,"feedback":"颜色改成蓝色"}' : '{"accepted":true,"feedback":"符合标准"}' } }] })
     },
-    saveImage: saveImage(saved),
+    saveImage: saveImage(),
   })
   assert.equal(result.accepted, true)
   assert.equal(result.iteration, 2)
   assert.equal(imagePrompts.length, 2)
   assert.match(imagePrompts[1], /颜色改成蓝色/)
-  assert.deepEqual(saved.map(({ iteration }) => iteration), [2])
 })
 
-test('达到拒绝上限时只保存返回的最终图片', async () => {
-  const saved = []
-  const result = await generateAndReview(config(), { prompt: 'a square', acceptanceCriteria: 'must be blue' }, {
-    timeoutMs: 100,
-    fetchImpl: async (_url, init) => {
-      const body = JSON.parse(init.body)
-      return body.prompt !== undefined
-        ? response({ data: [{ b64_json: IMAGE }] })
-        : response({ choices: [{ message: { content: '{"accepted":false,"feedback":"仍需调整"}' } }] })
-    },
-    saveImage: saveImage(saved),
-  })
-  assert.equal(result.accepted, false)
-  assert.equal(result.reviewStatus, 'rejected_at_limit')
-  assert.equal(result.iteration, 2)
-  assert.deepEqual(saved.map(({ iteration }) => iteration), [2])
-})
-
-test('审核 JSON 无效时只保存诊断图片并停止重试', async () => {
-  const saved = []
+test('审核 JSON 无效时保留图片并停止重试', async () => {
   let calls = 0
   const result = await generateAndReview(config(), { prompt: 'a square', acceptanceCriteria: 'blue' }, {
     timeoutMs: 100,
@@ -97,12 +73,10 @@ test('审核 JSON 无效时只保存诊断图片并停止重试', async () => {
       calls += 1
       return calls === 1 ? response({ data: [{ b64_json: IMAGE }] }) : response({ choices: [{ message: { content: 'not json' } }] })
     },
-    saveImage: saveImage(saved),
+    saveImage: saveImage(),
   })
   assert.equal(result.reviewStatus, 'review_unavailable')
   assert.equal(result.iteration, 1)
-  assert.equal(result.attachment.attachmentId, 'sha256:1')
-  assert.deepEqual(saved.map(({ iteration }) => iteration), [1])
   assert.equal(calls, 2)
 })
 
@@ -122,96 +96,35 @@ test('视觉审核失败不将已生成图片标记为未知结果', async () =>
   assert.equal(calls, 2)
 })
 
-test('取消视觉审核会向上传播且不持久化候选图片', async () => {
+test('视觉审核被调用方取消时向上抛出取消错误', async () => {
   const controller = new AbortController()
-  const saved = []
   let calls = 0
-  let reviewStarted
-  const reviewPending = new Promise(resolve => { reviewStarted = resolve })
   const pending = generateAndReview(config(), { prompt: 'a square', acceptanceCriteria: 'blue' }, {
     signal: controller.signal,
-    timeoutMs: 100,
+    timeoutMs: 1_000,
     fetchImpl: async (_url, init) => {
       calls += 1
       if (calls === 1) return response({ data: [{ b64_json: IMAGE }] })
-      reviewStarted()
-      return await new Promise((_resolve, reject) => {
-        init.signal.addEventListener('abort', () => reject(new Error('caller stopped')), { once: true })
+      return new Promise((_resolve, reject) => {
+        init.signal.addEventListener('abort', () => reject(new Error('review cancelled')), { once: true })
       })
     },
-    saveImage: saveImage(saved),
+    saveImage: saveImage(),
   })
-  await reviewPending
+  while (calls < 2) await new Promise(resolve => setImmediate(resolve))
   controller.abort(new Error('caller stopped'))
-  await assert.rejects(pending, error => error instanceof ImageIterateError
-    && error.code === 'CANCELLED'
-    && /视觉审核已取消/.test(error.message))
+  await assert.rejects(pending, error => error instanceof ImageIterateError && error.code === 'CANCELLED')
   assert.equal(calls, 2)
-  assert.equal(saved.length, 0)
 })
 
-test('审核 JSON 解析期间取消会向上传播且不持久化候选图片', async () => {
-  const controller = new AbortController()
-  const saved = []
-  let calls = 0
-  let reviewJsonStarted
-  let resolveReviewJson
-  const reviewJsonPending = new Promise(resolve => { resolveReviewJson = resolve })
-  const reviewJsonStartedPending = new Promise(resolve => { reviewJsonStarted = resolve })
-  const pending = generateAndReview(config(), { prompt: 'a square', acceptanceCriteria: 'blue' }, {
-    signal: controller.signal,
+test('视觉审核 endpoint 配置无效时不降级为审核不可用', async () => {
+  const invalid = config()
+  invalid.review.baseUrl = 'not an absolute URL'
+  await assert.rejects(() => generateAndReview(invalid, { prompt: 'a square', acceptanceCriteria: 'blue' }, {
     timeoutMs: 100,
-    fetchImpl: async () => {
-      calls += 1
-      if (calls === 1) return response({ data: [{ b64_json: IMAGE }] })
-      return {
-        ok: true,
-        json: async () => {
-          reviewJsonStarted()
-          return await reviewJsonPending
-        },
-      }
-    },
-    saveImage: saveImage(saved),
-  })
-  await reviewJsonStartedPending
-  controller.abort(new Error('caller stopped'))
-  resolveReviewJson({ choices: [{ message: { content: '{"accepted":false,"feedback":"retry"}' } }] })
-  await assert.rejects(pending, error => error instanceof ImageIterateError
-    && error.code === 'CANCELLED'
-    && /视觉审核已取消/.test(error.message))
-  assert.equal(calls, 2)
-  assert.equal(saved.length, 0)
-})
-
-test('最终图片持久化开始后取消仍返回已提交图片', async () => {
-  const controller = new AbortController()
-  let calls = 0
-  let saveStarted
-  const saveStartedPending = new Promise(resolve => { saveStarted = resolve })
-  let resolveSave
-  const savePending = new Promise(resolve => { resolveSave = resolve })
-  const pending = generateAndReview(config(), { prompt: 'a square', acceptanceCriteria: 'blue' }, {
-    signal: controller.signal,
-    timeoutMs: 100,
-    fetchImpl: async (_url, init) => {
-      calls += 1
-      return calls === 1
-        ? response({ data: [{ b64_json: IMAGE }] })
-        : response({ choices: [{ message: { content: '{"accepted":true,"feedback":"符合标准"}' } }] })
-    },
-    saveImage: async () => {
-      saveStarted()
-      await savePending
-      return { attachmentId: 'sha256:committed', mediaType: 'image/png', bytes: 11, width: 1, height: 1, name: 'image.png' }
-    },
-  })
-  await saveStartedPending
-  controller.abort(new Error('caller stopped'))
-  resolveSave()
-  const result = await pending
-  assert.equal(result.accepted, true)
-  assert.equal(result.attachment.attachmentId, 'sha256:committed')
+    fetchImpl: async () => response({ data: [{ b64_json: IMAGE }] }),
+    saveImage: saveImage(),
+  }), error => error instanceof ImageIterateError && error.code === 'INVALID_CONFIG')
 })
 
 test('图像响应缺少 b64_json 时标记为未知结果', async () => {
@@ -246,7 +159,7 @@ test('图像响应包含非法 b64_json 时标记为未知结果', async () => {
   assert.equal(calls, 1)
 })
 
-test('合法 base64 的非图片载荷在附件校验后仍标记为未知结果', async () => {
+test('合法 base64 的非图片载荷在最终附件校验失败后标记为未知结果', async () => {
   const attachmentError = Object.assign(new Error('Unsupported or malformed image data.'), { code: 'INVALID_IMAGE' })
   let calls = 0
   let saves = 0

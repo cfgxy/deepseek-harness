@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
-// The external image-review client bundle must travel through the same WebBootGraph
-// and ModuleLoader path as installed bundles. The fixture result carries the durable
-// tool metadata that the Host stores after the attachment save completes.
+// The default image-review client bundle must travel through the same WebBootGraph
+// and ModuleLoader path as the Web/Desktop installation. The fixture result carries
+// the durable tool metadata that the Host stores after the attachment save completes.
 import { readFileSync } from 'node:fs'
 import { dirname, resolve } from 'node:path'
 import { fireEvent, screen, waitFor, within } from '@testing-library/react'
@@ -18,7 +18,9 @@ installAssembledBootEnv()
 interface ImageReviewManifest {
   readonly name?: unknown
   readonly exports?: { readonly './client'?: unknown }
+  readonly dependencies?: Record<string, unknown>
   readonly peerDependencies?: Record<string, unknown>
+  readonly devDependencies?: Record<string, unknown>
   readonly dsh?: {
     readonly client?: {
       readonly platform?: unknown
@@ -27,13 +29,16 @@ interface ImageReviewManifest {
   }
 }
 
-const imageReviewManifestPath = resolve(import.meta.dirname, '../../../image-iterate-plugin/package.json')
+const imageReviewManifestPath = resolve(import.meta.dirname, '../../../packages/bundle/image-iterate-plugin/package.json')
 
 function loadImageReviewClient(manifest: ImageReviewManifest): AdditionalAssembledPlugin {
   const name = manifest.name
   const clientExport = manifest.exports?.['./client']
+  const relativeClientExport = typeof clientExport === 'string'
+    ? clientExport
+    : record(clientExport)?.default
   const declaration = manifest.dsh?.client
-  if (typeof name !== 'string' || typeof clientExport !== 'string') {
+  if (typeof name !== 'string' || typeof relativeClientExport !== 'string') {
     throw new Error('image review plugin must publish a named ./client export')
   }
   if (declaration?.platform !== 'web') {
@@ -42,23 +47,23 @@ function loadImageReviewClient(manifest: ImageReviewManifest): AdditionalAssembl
   if (!Array.isArray(declaration.inject) || !declaration.inject.every(dependency => typeof dependency === 'string')) {
     throw new Error('image review plugin client must declare injected dependencies')
   }
-  const publishedDependencies = manifest.peerDependencies ?? {}
-  const unpublishedDependency = declaration.inject.find(dependency => !(dependency in publishedDependencies))
-  if (unpublishedDependency !== undefined) {
-    throw new Error(`image review plugin inject dependency is not published: ${unpublishedDependency}`)
+  const declaredDependencies = {
+    ...manifest.dependencies,
+    ...manifest.peerDependencies,
+    ...manifest.devDependencies,
+  }
+  const undeclaredDependency = declaration.inject.find(dependency => !(dependency in declaredDependencies))
+  if (undeclaredDependency !== undefined) {
+    throw new Error(`image review plugin inject dependency is not declared: ${undeclaredDependency}`)
   }
   return {
     id: name,
-    bundlePath: resolve(dirname(imageReviewManifestPath), clientExport),
+    bundlePath: resolve(dirname(imageReviewManifestPath), relativeClientExport),
     url: `plugins/${name}/client.js`,
     rev: 'fixture-image-iterate',
     inject: declaration.inject,
   }
 }
-
-const imageReviewClient = loadImageReviewClient(
-  JSON.parse(readFileSync(imageReviewManifestPath, 'utf8')) as ImageReviewManifest,
-)
 
 const attachment = {
   attachmentId: 'image-review-fixture',
@@ -221,7 +226,7 @@ async function openImageIterateSettings(): Promise<void> {
     return value
   })
   fireEvent.click(within(card).getByRole('button', { name: /^View Image generation and review$/ }))
-  await screen.findByLabelText('Image API base URL')
+  await screen.findByLabelText('Image override API base URL')
 }
 
 it('rejects inconsistent published client metadata before assembly', () => {
@@ -235,13 +240,14 @@ it('rejects inconsistent published client metadata before assembly', () => {
   if (!Array.isArray(injected) || injected.length === 0 || typeof injected[0] !== 'string') {
     throw new Error('image review plugin fixture is missing its published injection list')
   }
-  const { [injected[0]]: _omitted, ...peerDependencies } = manifest.peerDependencies ?? {}
-  expect(() => loadImageReviewClient({ ...manifest, peerDependencies })).toThrow(/not published/u)
+  const { [injected[0]]: _peerOmitted, ...peerDependencies } = manifest.peerDependencies ?? {}
+  const { [injected[0]]: _dependencyOmitted, ...dependencies } = manifest.dependencies ?? {}
+  const { [injected[0]]: _devDependencyOmitted, ...devDependencies } = manifest.devDependencies ?? {}
+  expect(() => loadImageReviewClient({ ...manifest, dependencies, peerDependencies, devDependencies })).toThrow(/not declared/u)
 })
 
 it('loads a persistent image-review attachment through the installed client bundle', async () => {
   const remote = mountAssembledApp({
-    additionalPlugins: [imageReviewClient],
     remote: {
       alphaRecords: imageResult,
       attachmentAliases: { 'image-review-fixture': 'fixture:image' },
@@ -255,7 +261,7 @@ it('loads a persistent image-review attachment through the installed client bund
       const calls = [...document.querySelectorAll<HTMLElement>('[data-chat-call-id]')]
         .map(element => element.getAttribute('data-chat-call-id'))
       const boot = Reflect.get(window, '__DSH_BOOT__') as { entries?: { id?: string }[] } | undefined
-      const pluginLoaded = boot?.entries?.some(entry => entry.id === 'dsh-image-iterate-plugin') === true
+      const pluginLoaded = boot?.entries?.some(entry => entry.id === '@deepseek-ai/dsh-image-iterate-plugin') === true
       throw new Error(`image review tool row missing; visible calls=${JSON.stringify(calls)}; plugin entry=${String(pluginLoaded)}`)
     }
     return value
@@ -274,20 +280,30 @@ it('loads a persistent image-review attachment through the installed client bund
   })
 })
 
-it('saves image-provider settings separately from write-only credentials', async () => {
-  const remote = mountAssembledApp({
-    additionalPlugins: [imageReviewClient],
+it('shows current-provider inheritance when all overrides are blank', async () => {
+  mountAssembledApp({
     remote: { imageIterate: {} },
   })
 
   await openImageIterateSettings()
-  const imageBaseUrl = screen.getByLabelText('Image API base URL')
+  expect(await screen.findByText('Leave all override fields blank to inherit the current chat provider. Set endpoint, model, and credential reference together for an advanced override.')).not.toBeNull()
+  expect((screen.getByLabelText('Image override API base URL') as HTMLInputElement).value).toBe('')
+  expect((screen.getByLabelText('Review override API base URL') as HTMLInputElement).value).toBe('')
+})
+
+it('saves image-provider settings separately from write-only credentials', async () => {
+  const remote = mountAssembledApp({
+    remote: { imageIterate: {} },
+  })
+
+  await openImageIterateSettings()
+  const imageBaseUrl = screen.getByLabelText('Image override API base URL')
   fireEvent.change(imageBaseUrl, { target: { value: 'https://images.example.test/v1' } })
-  fireEvent.change(screen.getByLabelText('Image model'), { target: { value: 'image-fixture' } })
-  fireEvent.change(screen.getByLabelText('Image credential reference'), { target: { value: 'IMAGE_FIXTURE_KEY' } })
-  fireEvent.change(screen.getByLabelText('Review API base URL'), { target: { value: 'https://review.example.test/v1' } })
-  fireEvent.change(screen.getByLabelText('Review model'), { target: { value: 'review-fixture' } })
-  fireEvent.change(screen.getByLabelText('Review credential reference'), { target: { value: 'REVIEW_FIXTURE_KEY' } })
+  fireEvent.change(screen.getByLabelText('Image override model'), { target: { value: 'image-fixture' } })
+  fireEvent.change(screen.getByLabelText('Image override credential reference'), { target: { value: 'IMAGE_FIXTURE_KEY' } })
+  fireEvent.change(screen.getByLabelText('Review override API base URL'), { target: { value: 'https://review.example.test/v1' } })
+  fireEvent.change(screen.getByLabelText('Review override model'), { target: { value: 'review-fixture' } })
+  fireEvent.change(screen.getByLabelText('Review override credential reference'), { target: { value: 'REVIEW_FIXTURE_KEY' } })
   fireEvent.change(screen.getByLabelText('Image API key'), { target: { value: 'test-image-secret' } })
   fireEvent.change(screen.getByLabelText('Review API key'), { target: { value: 'test-review-secret' } })
   fireEvent.click(screen.getByRole('button', { name: /^Save$/ }))
@@ -319,12 +335,11 @@ it('saves image-provider settings separately from write-only credentials', async
 
 it('does not write credentials when the settings document rejects the ordinary fields', async () => {
   const remote = mountAssembledApp({
-    additionalPlugins: [imageReviewClient],
     remote: { imageIterate: { mutationsAccepted: false } },
   })
   await openImageIterateSettings()
-  fireEvent.change(screen.getByLabelText('Image API base URL'), { target: { value: 'https://images.example.test/v1' } })
-  fireEvent.change(screen.getByLabelText('Image credential reference'), { target: { value: 'IMAGE_FIXTURE_KEY' } })
+  fireEvent.change(screen.getByLabelText('Image override API base URL'), { target: { value: 'https://images.example.test/v1' } })
+  fireEvent.change(screen.getByLabelText('Image override credential reference'), { target: { value: 'IMAGE_FIXTURE_KEY' } })
   const secret = screen.getByLabelText('Image API key')
   fireEvent.change(secret, { target: { value: 'preserved-secret' } })
   fireEvent.click(screen.getByRole('button', { name: /^Save$/ }))
@@ -339,11 +354,10 @@ it('does not write credentials when the settings document rejects the ordinary f
 
 it('keeps a secret draft when the credential store rejects it', async () => {
   const remote = mountAssembledApp({
-    additionalPlugins: [imageReviewClient],
     remote: { imageIterate: { configuredCredentials: ['IMAGE_FIXTURE_KEY'], credentialsAccepted: false } },
   })
   await openImageIterateSettings()
-  fireEvent.change(screen.getByLabelText('Image credential reference'), { target: { value: 'IMAGE_FIXTURE_KEY' } })
+  fireEvent.change(screen.getByLabelText('Image override credential reference'), { target: { value: 'IMAGE_FIXTURE_KEY' } })
   await waitFor(() => {
     expect(screen.getByText('A key is configured.', { exact: true })).not.toBeNull()
   })
@@ -361,7 +375,6 @@ it('keeps a secret draft when the credential store rejects it', async () => {
 
 it('marks a replacement credential status unknown when its read is rejected', async () => {
   mountAssembledApp({
-    additionalPlugins: [imageReviewClient],
     remote: {
       imageIterate: {
         configuredCredentials: ['OLD_IMAGE_FIXTURE_KEY'],
@@ -370,11 +383,11 @@ it('marks a replacement credential status unknown when its read is rejected', as
     },
   })
   await openImageIterateSettings()
-  fireEvent.change(screen.getByLabelText('Image credential reference'), { target: { value: 'OLD_IMAGE_FIXTURE_KEY' } })
+  fireEvent.change(screen.getByLabelText('Image override credential reference'), { target: { value: 'OLD_IMAGE_FIXTURE_KEY' } })
   await waitFor(() => {
     expect(screen.getByText('A key is configured.', { exact: true })).not.toBeNull()
   })
-  fireEvent.change(screen.getByLabelText('Image credential reference'), { target: { value: 'NEW_IMAGE_FIXTURE_KEY' } })
+  fireEvent.change(screen.getByLabelText('Image override credential reference'), { target: { value: 'NEW_IMAGE_FIXTURE_KEY' } })
 
   expect(await screen.findByText('Credential status is unavailable.', { exact: true })).not.toBeNull()
   expect(screen.queryByText('A key is configured.', { exact: true })).toBeNull()
@@ -382,11 +395,10 @@ it('marks a replacement credential status unknown when its read is rejected', as
 
 it('clears a replacement credential while old and new status reads are pending', async () => {
   const remote = mountAssembledApp({
-    additionalPlugins: [imageReviewClient],
     remote: { imageIterate: { configuredCredentials: ['OLD_IMAGE_FIXTURE_KEY'] } },
   })
   await openImageIterateSettings()
-  fireEvent.change(screen.getByLabelText('Image credential reference'), { target: { value: 'OLD_IMAGE_FIXTURE_KEY' } })
+  fireEvent.change(screen.getByLabelText('Image override credential reference'), { target: { value: 'OLD_IMAGE_FIXTURE_KEY' } })
   await waitFor(() => {
     expect(screen.getByText('A key is configured.', { exact: true })).not.toBeNull()
   })
@@ -399,7 +411,7 @@ it('clears a replacement credential while old and new status reads are pending',
   await waitFor(() => {
     expect(remote.mock.log.calls('credentials/describe')).toHaveLength(credentialDescriptionsBeforeRefresh + 1)
   })
-  fireEvent.change(screen.getByLabelText('Image credential reference'), { target: { value: 'NEW_IMAGE_FIXTURE_KEY' } })
+  fireEvent.change(screen.getByLabelText('Image override credential reference'), { target: { value: 'NEW_IMAGE_FIXTURE_KEY' } })
   await waitFor(() => {
     expect(remote.mock.log.calls('credentials/describe')).toHaveLength(credentialDescriptionsBeforeRefresh + 2)
   })
@@ -423,11 +435,10 @@ it('clears a replacement credential while old and new status reads are pending',
 
 it('disables both secret controls while a credential write is pending', async () => {
   const remote = mountAssembledApp({
-    additionalPlugins: [imageReviewClient],
     remote: { imageIterate: { credentialSetDelayMs: 100 } },
   })
   await openImageIterateSettings()
-  fireEvent.change(screen.getByLabelText('Image credential reference'), { target: { value: 'IMAGE_FIXTURE_KEY' } })
+  fireEvent.change(screen.getByLabelText('Image override credential reference'), { target: { value: 'IMAGE_FIXTURE_KEY' } })
   const imageSecret = screen.getByLabelText('Image API key') as HTMLInputElement
   const reviewSecret = screen.getByLabelText('Review API key') as HTMLInputElement
   fireEvent.change(imageSecret, { target: { value: 'pending-secret' } })
@@ -445,7 +456,6 @@ it('disables both secret controls while a credential write is pending', async ()
 
 it('blocks invalid numeric settings before any remote write', async () => {
   const remote = mountAssembledApp({
-    additionalPlugins: [imageReviewClient],
     remote: { imageIterate: {} },
   })
   await openImageIterateSettings()
