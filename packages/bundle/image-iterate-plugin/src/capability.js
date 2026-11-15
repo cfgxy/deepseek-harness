@@ -211,22 +211,25 @@ export async function resolveImageCapability(ctx, agent, size, quality, signal) 
   }
   let review
   if (model.inputModalities?.includes('image') === true) {
-    const exactReview = reviewCandidates.filter(candidate => candidate.model === current.model)
-    if (exactReview.length === 1) review = exactReview[0]
-    else if (exactReview.length === 0 && reviewCandidates.length === 1) review = reviewCandidates[0]
-    else if (exactReview.length > 1 || reviewCandidates.length > 1) {
-      const selectedId = await askForReviewCapability(
-        ctx,
-        agent,
-        signal,
-        exactReview.length > 1 ? exactReview : reviewCandidates,
-        current.provider,
-        current.model,
-      )
-      const selectable = exactReview.length > 1 ? exactReview : reviewCandidates
-      review = selectable.find(candidate => candidate.id === selectedId)
+    if (inlineReview?.model === current.model) {
+      review = inlineReview
+    } else {
+      const exactReview = reviewCandidates.filter(candidate => candidate.model === current.model)
+      if (exactReview.length === 1) review = exactReview[0]
+      else if (exactReview.length === 0 && reviewCandidates.length === 1) review = reviewCandidates[0]
+      else if (exactReview.length > 1 || reviewCandidates.length > 1) {
+        const selectedId = await askForReviewCapability(
+          ctx,
+          agent,
+          signal,
+          exactReview.length > 1 ? exactReview : reviewCandidates,
+          current.provider,
+          current.model,
+        )
+        const selectable = exactReview.length > 1 ? exactReview : reviewCandidates
+        review = selectable.find(candidate => candidate.id === selectedId)
+      }
     }
-    if (review === undefined && inlineReview?.model === current.model) review = inlineReview
   } else {
     review = inlineReview
     if (review === undefined) {

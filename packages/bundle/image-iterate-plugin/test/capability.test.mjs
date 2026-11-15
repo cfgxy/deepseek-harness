@@ -142,6 +142,17 @@ test('当前聊天模型声明 image 输入时优先使用当前模型视觉审�
   assert.equal(ctx.asked.length, 0)
 })
 
+test('当前模型的 inline review 优先于非 exact 独立审核路由', async () => {
+  const selected = capability({ model: 'image-model' })
+  const otherReview = reviewCapability({ id: 'review-other', model: 'vision-model' })
+  const ctx = context([selected], undefined, { inputModalities: ['text', 'image'] })
+  ctx.imageCapabilities.listReviews = async () => [otherReview]
+  const result = await resolveImageCapability(ctx, agent({ provider: 'provider-a', model: 'image-model' }), '1024x1024', 'medium')
+  assert.equal(result.capability.id, 'image-a')
+  assert.equal(result.review.id, 'image-a')
+  assert.equal(ctx.asked.length, 0)
+})
+
 test('正式 registry 的 provider 注册随 Cordis effect 卸载', async () => {
   const ctx = new Context()
   const registry = provideImageCapabilityRegistry(ctx)

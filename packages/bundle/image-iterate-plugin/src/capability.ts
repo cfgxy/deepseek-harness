@@ -114,7 +114,10 @@ export class ImageCapabilityRegistryService implements ImageCapabilityRegistry {
   }
 }
 
-/** Ensure the formal registry service exists in the current Cordis scope. */
+/** Ensure the formal registry service exists in the current Cordis scope.
+ * @param ctx - Cordis context that owns the registry service.
+ * @returns The existing or newly provided image capability registry.
+ */
 export function provideImageCapabilityRegistry(ctx: Context): ImageCapabilityRegistry {
   const existing = ctx.get('imageCapabilities')
   if (existing !== undefined) return existing
@@ -185,6 +188,10 @@ type SelectionRequest = {
   options?: QuestionOption[]
 }
 
+/** Format a model label for capability-selection questions.
+ * @param info - Model metadata returned by the provider directory.
+ * @returns The display name with the stable model id when they differ.
+ */
 function modelLabel(info: LlmModelInfo): string {
   return info.name === info.id ? info.id : `${info.name} (${info.id})`
 }
@@ -365,22 +372,25 @@ export async function resolveImageCapability(
   }
   let review: ImageReviewCapability | undefined
   if (model.inputModalities?.includes('image') === true) {
-    const exactReview = reviewCandidates.filter(candidate => candidate.model === current.model)
-    if (exactReview.length === 1) review = exactReview[0]
-    else if (exactReview.length === 0 && reviewCandidates.length === 1) review = reviewCandidates[0]
-    else if (exactReview.length > 1 || reviewCandidates.length > 1) {
-      const selectedId = await askForReviewCapability(
-        ctx,
-        agent,
-        signal,
-        exactReview.length > 1 ? exactReview : reviewCandidates,
-        current.provider,
-        current.model,
-      )
-      const selectable = exactReview.length > 1 ? exactReview : reviewCandidates
-      review = selectable.find(candidate => candidate.id === selectedId)
+    if (inlineReview?.model === current.model) {
+      review = inlineReview
+    } else {
+      const exactReview = reviewCandidates.filter(candidate => candidate.model === current.model)
+      if (exactReview.length === 1) review = exactReview[0]
+      else if (exactReview.length === 0 && reviewCandidates.length === 1) review = reviewCandidates[0]
+      else if (exactReview.length > 1 || reviewCandidates.length > 1) {
+        const selectedId = await askForReviewCapability(
+          ctx,
+          agent,
+          signal,
+          exactReview.length > 1 ? exactReview : reviewCandidates,
+          current.provider,
+          current.model,
+        )
+        const selectable = exactReview.length > 1 ? exactReview : reviewCandidates
+        review = selectable.find(candidate => candidate.id === selectedId)
+      }
     }
-    if (review === undefined && inlineReview?.model === current.model) review = inlineReview
   } else {
     review = inlineReview
     if (review === undefined) {

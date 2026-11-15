@@ -59,14 +59,22 @@ kind: "package-bundle"
 Provider 插件通过正式的 `ImageCapabilityRegistry` 注册受控操作，不把 endpoint 或凭据写入 image 插件配置。Provider 应在 Cordis effect 中注册图像生成和必要的独立审核路由；卸载 provider 时，effect 会移除对应路由：
 
 ```ts
+import type { Context } from '@deepseek-ai/cordis'
+import { provideImageCapabilityRegistry } from '@deepseek-ai/dsh-image-iterate-plugin'
+import type { ImageCapability } from '@deepseek-ai/dsh-image-iterate-plugin'
+
+declare const ctx: Context
+declare const providerGenerate: ImageCapability['generate']
+declare const providerReview: NonNullable<ImageCapability['review']>
+
 const registry = provideImageCapabilityRegistry(ctx)
 ctx.effect(() => registry.register({
   id: 'provider-image-route',
   provider: 'provider-id',
   model: 'declared-image-model',
   label: 'Provider image route',
-  generate: request => providerGenerate(request),
-  review: request => providerReview(request),
+  generate: providerGenerate,
+  review: providerReview,
 }))
 ```
 
@@ -121,6 +129,7 @@ shipped provider 路由使用测试自有的 loopback HTTP server，只能作为
 
 <a id="known-limitations-and-deferred-work"></a>
 
+- **随附的 Web/Desktop profile 自身不提供图像路由**：自动继承只在其他 provider 插件注册 capability 后可用；否则必须配置包含授权兼容 endpoint、model 和凭据引用的两组 override。
 - **本地测试不能证明真实 provider 兼容性**：仍需单独核对 provider 的 endpoint 行为、模型可用性、凭据权限、额度和响应字段。
 - **审核精度取决于配置的视觉模型**：插件会强制校验返回 JSON 并限制迭代次数，但不能保证主观验收标准一定被正确判断。
 - **内置配置项没有交互式凭据编辑器**：配置路径仍是 profile patch 或 DSH credential service。

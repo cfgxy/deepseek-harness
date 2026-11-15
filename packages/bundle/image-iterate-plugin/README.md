@@ -59,14 +59,22 @@ In explicit override mode, image and review credentials are resolved on every to
 Provider plugins register controlled operations through the formal `ImageCapabilityRegistry`; they do not place endpoints or credentials in image-plugin settings. A provider registers generation and, when needed, an independent review route inside a Cordis effect so unloading the provider removes both routes:
 
 ```ts
+import type { Context } from '@deepseek-ai/cordis'
+import { provideImageCapabilityRegistry } from '@deepseek-ai/dsh-image-iterate-plugin'
+import type { ImageCapability } from '@deepseek-ai/dsh-image-iterate-plugin'
+
+declare const ctx: Context
+declare const providerGenerate: ImageCapability['generate']
+declare const providerReview: NonNullable<ImageCapability['review']>
+
 const registry = provideImageCapabilityRegistry(ctx)
 ctx.effect(() => registry.register({
   id: 'provider-image-route',
   provider: 'provider-id',
   model: 'declared-image-model',
   label: 'Provider image route',
-  generate: request => providerGenerate(request),
-  review: request => providerReview(request),
+  generate: providerGenerate,
+  review: providerReview,
 }))
 ```
 
@@ -121,6 +129,7 @@ The tool schema is stable for a fixed profile and plugin version. The result tex
 
 <a id="known-limitations-and-deferred-work"></a>
 
+- **The shipped Web/Desktop profile does not provide an image route by itself** — automatic inheritance works only when another provider plugin registers a capability; otherwise configure both override groups with an authorized compatible endpoint, model, and credential reference.
 - **Real provider compatibility is not established by local tests** — providers must be checked separately for endpoint behavior, model availability, credential permission, quota, and response fields.
 - **Review is only as precise as the configured vision model** — the plugin enforces the returned JSON and iteration ceiling, but it cannot guarantee that subjective acceptance criteria are judged correctly.
 - **The built-in row has no interactive credential editor** — profile patching or the DSH credential service remains the configuration path.
