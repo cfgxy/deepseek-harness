@@ -108,8 +108,7 @@ test('Cordis composition 使用当前 provider 路由并优先当前模型视觉
   assert.equal(result.image.mediaType, 'image/png')
   assert.equal(result.image.width, 1)
   assert.equal(result.image.height, 1)
-  assert.equal(asked.length, 1)
-  assert.equal(asked[0].questions[0].id, 'image-capability')
+  assert.equal(asked.length, 0)
   assert.deepEqual(calls.map(call => call.type), ['generate', 'review'])
   assert.equal(calls[1].request.acceptanceCriteria, 'must be blue')
 

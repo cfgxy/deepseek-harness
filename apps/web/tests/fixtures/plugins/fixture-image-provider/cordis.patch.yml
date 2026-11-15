@@ -1,0 +1,3 @@
+- insert:
+    - id: fixture-image-provider
+      name: '@fixture/image-provider'

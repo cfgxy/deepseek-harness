@@ -9,8 +9,11 @@ import {
   IMAGE_GENERATION_OUTCOME_UNKNOWN_MESSAGE,
   ImageIterateError,
   generateAndReview,
+  generateImage,
+  reviewImage,
 } from './api.ts'
 import type { Config } from './index.ts'
+import type { GeneratedImage, ImageGenerationConfig, ReviewConfig } from './api.ts'
 import { capabilityConfig, ImageCapabilityError, provideImageCapabilityRegistry, resolveImageCapability } from './capability.ts'
 
 export const name = 'image-iterate-plugin'
@@ -106,6 +109,51 @@ async function resolveCredential(ctx: Context, reference: string, role: string):
   return resolved.value
 }
 
+/** Register a complete configured route without exposing its endpoint or credential to the registry. */
+function registerConfiguredCapability(
+  ctx: Context,
+  provider: string,
+  config: Config,
+  outputFormat: OutputFormat,
+): () => void {
+  const noPersist = async (_image: GeneratedImage, _iteration: number): Promise<never> => {
+    throw new ImageIterateError('IMAGE_ITERATE_FAILED', '单次 provider capability 不应直接持久化图像。')
+  }
+  const imageConfig = async (size: string, quality: string): Promise<ImageGenerationConfig> => ({
+    baseUrl: config.imageBaseUrl,
+    model: config.imageModel,
+    token: await resolveCredential(ctx, config.imageCredential, '图像生成'),
+    size,
+    quality,
+    outputFormat,
+  })
+  const reviewConfig = async (): Promise<ReviewConfig> => ({
+    baseUrl: config.reviewBaseUrl,
+    model: config.reviewModel,
+    token: await resolveCredential(ctx, config.reviewCredential, '视觉审核'),
+  })
+  const registry = ctx.get('imageCapabilities')
+  if (registry === undefined) throw new ImageCapabilityError('CAPABILITY_UNAVAILABLE', '图像 capability registry 尚未提供。')
+  return registry.register({
+    id: `image-iterate-override:${provider}`,
+    provider,
+    model: config.imageModel,
+    label: 'Configured OpenAI-compatible image route',
+    generate: async request => generateImage(await imageConfig(request.size, request.quality), request.prompt, {
+      timeoutMs: config.timeoutMs,
+      fetchImpl: fetch,
+      ...(request.signal === undefined ? {} : { signal: request.signal }),
+      saveImage: noPersist,
+    }),
+    review: async request => reviewImage(await reviewConfig(), request.image, request.acceptanceCriteria, {
+      timeoutMs: config.timeoutMs,
+      fetchImpl: fetch,
+      ...(request.signal === undefined ? {} : { signal: request.signal }),
+      saveImage: noPersist,
+    }),
+  })
+}
+
 function asHarnessError(error: unknown): HarnessError {
   if (error instanceof HarnessError) return error
   const code = error instanceof ImageIterateError
@@ -194,17 +242,25 @@ export function apply(ctx: Context, config: Config): void {
       return { card: 'generic', content: [{ type: 'image', attachment: image }] }
     },
     async execute(args: ImageToolArgs, exec): Promise<ImageToolResult> {
+      let configuredDisposer: (() => void) | undefined
       try {
         const outputFormat = ensureConfig(config)
         const imageOverride = config.imageBaseUrl.trim() !== ''
         const reviewOverride = config.reviewBaseUrl.trim() !== ''
         const size = args.size ?? config.defaultSize
         const quality = args.quality ?? config.defaultQuality
-        const automatic = imageOverride && reviewOverride
-          ? undefined
-          : exec.agent === undefined
+        let automatic
+        if (imageOverride && reviewOverride && exec.agent !== undefined) {
+          const current = exec.agent.model.current()
+          if (current?.provider !== undefined && current.provider.trim() !== '') {
+            configuredDisposer = registerConfiguredCapability(ctx, current.provider, config, outputFormat)
+            automatic = await resolveImageCapability(ctx, exec.agent, size, quality, exec.signal)
+          }
+        } else if (!imageOverride || !reviewOverride) {
+          automatic = exec.agent === undefined
             ? (() => { throw new ImageCapabilityError('CAPABILITY_UNAVAILABLE', '当前工具调用没有可用的 agent，无法继承聊天 provider。') })()
             : await resolveImageCapability(ctx, exec.agent, size, quality, exec.signal)
+        }
         const resolvedSize = automatic?.size ?? size
         const resolvedQuality = automatic?.quality ?? quality
         if (resolvedSize.trim() === '' || resolvedQuality.trim() === '') {
@@ -213,7 +269,7 @@ export function apply(ctx: Context, config: Config): void {
         const selected = automatic === undefined
           ? undefined
           : capabilityConfig(automatic.capability, automatic.review, resolvedSize, resolvedQuality, outputFormat)
-        const image = imageOverride
+        const image = automatic === undefined && imageOverride
           ? {
             baseUrl: config.imageBaseUrl,
             model: config.imageModel,
@@ -225,7 +281,7 @@ export function apply(ctx: Context, config: Config): void {
           : selected === undefined
             ? (() => { throw new ImageCapabilityError('CAPABILITY_UNAVAILABLE', '图像 capability 未解析。') })()
             : selected.image
-        const review = reviewOverride
+        const review = automatic === undefined && reviewOverride
           ? {
             baseUrl: config.reviewBaseUrl,
             model: config.reviewModel,
@@ -261,6 +317,8 @@ export function apply(ctx: Context, config: Config): void {
         }
       } catch (error) {
         throw asHarnessError(error)
+      } finally {
+        configuredDisposer?.()
       }
     },
   })), 'image-iterate-plugin: image review tool')

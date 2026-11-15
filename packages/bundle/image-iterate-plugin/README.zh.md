@@ -32,7 +32,7 @@ kind: "package-bundle"
 <a id="configuration"></a>
 ## 配置
 
-默认内置配置项不包含 endpoint、model 或 credential 值。未配置的安装仍会加载插件，工具会优先继承当前聊天 provider；如果该 provider 没有唯一的 provider-owned image capability，会通过用户问询澄清，而不是按模型名称猜测。显式 endpoint、model 和 credential reference 仍可作为高级覆盖，且每个覆盖角色必须成组填写。credential 字段填写 POSIX 环境变量名或 DSH credential reference，不是密钥值；原始密钥只由 provider 或 credential service 持有，不会进入普通 settings 或日志。
+默认内置配置项不包含 endpoint、model 或 credential 值。未配置的安装仍会加载插件，工具会优先继承当前聊天 provider。model 完全匹配时，如果只有一个 exact capability 会自动选择；没有 exact 匹配但该 provider 只有一个 capability 时，也会自动选择而不发起问询。存在多个候选时通过用户问询选择；没有候选或问询没有答案时返回诊断，而不是按模型名称猜测。显式 endpoint、model 和 credential reference 仍可作为高级覆盖，且每个覆盖角色必须成组填写。credential 字段填写 POSIX 环境变量名或 DSH credential reference，不是密钥值；原始密钥只由 provider 或 credential service 持有，不会进入普通 settings 或日志。
 
 ```yaml
 - id: image-iterate-plugin
@@ -51,7 +51,7 @@ kind: "package-bundle"
     outputFormat: png
 ```
 
-显式覆盖模式下，插件在每次工具调用时重新解析图像和审核凭据，因此凭据轮换无需重启进程。如果图像生成与视觉审核需要不同的访问权限或审计范围，应保持两个引用独立。自动继承模式下，provider 负责 endpoint 和凭据，插件只接收受控 closure。
+显式覆盖模式下，插件在每次工具调用时重新解析图像和审核凭据，因此凭据轮换无需重启进程。如果图像生成与视觉审核需要不同的访问权限或审计范围，应保持两个引用独立。当两个覆盖角色完整配置且调用带有 agent provider 路由时，插件会注册一个临时 provider-owned capability，由其中的 closure 解析凭据，并在 `finally` 中卸载；没有 agent 的调用仍保留显式直接 fallback。自动继承模式下，provider 负责 endpoint 和凭据，插件只接收受控 closure。
 
 <a id="provider-capability-registration"></a>
 ## Provider capability 注册
@@ -59,7 +59,8 @@ kind: "package-bundle"
 Provider 插件通过正式的 `ImageCapabilityRegistry` 注册受控操作，不把 endpoint 或凭据写入 image 插件配置。Provider 应在 Cordis effect 中注册图像生成和必要的独立审核路由；卸载 provider 时，effect 会移除对应路由：
 
 ```ts
-ctx.effect(() => ctx.imageCapabilities.register({
+const registry = provideImageCapabilityRegistry(ctx)
+ctx.effect(() => registry.register({
   id: 'provider-image-route',
   provider: 'provider-id',
   model: 'declared-image-model',
@@ -69,7 +70,7 @@ ctx.effect(() => ctx.imageCapabilities.register({
 }))
 ```
 
-插件从 agent 路由读取当前聊天 provider/model，并且只自动选择 model 完全匹配的图像生成路由。没有 exact 路由或存在多个路由时，通过 `ctx.userQuestions.ask` 询问用户。视觉审核方面，只有解析后的模型 metadata 明确包含 `inputModalities: ['image']` 时才优先复用当前模型；否则从同一 provider 所有审核路由中选择，无法安全决策时询问用户。Capability closure 将 provider 的 endpoint 和凭据处理留在插件之外。
+插件从 agent 路由读取当前聊天 provider/model。它会自动选择一个 exact 图像生成路由；没有 exact 路由但 provider 只有一个路由时也会自动选择。存在多个候选时通过 `ctx.userQuestions.ask` 询问用户；没有候选或问询没有答案时返回诊断。视觉审核方面，只有解析后的模型 metadata 明确包含 `inputModalities: ['image']` 时才优先复用当前模型；否则从同一 provider 所有审核路由中选择，无法安全决策时询问用户。Capability closure 将 provider 的 endpoint 和凭据处理留在插件之外。
 
 <a id="failure-and-cost-boundaries"></a>
 ## 失败与费用边界
@@ -90,13 +91,14 @@ ctx.effect(() => ctx.imageCapabilities.register({
 node --test packages/bundle/image-iterate-plugin/test/*.test.mjs
 ```
 
-随附的 Web 组合测试会加载实际 Web bundle、ModuleLoader 注册、attachment loader 与官方 gallery 路径：
+随附的 Web 组合测试会加载实际 Web bundle、ModuleLoader/profile 注册、provider-owned capability 路由、attachment loader 与官方 gallery 路径：
 
 ```sh
+pnpm exec vitest run --config vitest.web.config.ts apps/web/tests/shipped-composition.e2e.ts
 pnpm exec vitest run --config vitest.web.config.ts apps/web/tests/image-iterate-client.e2e.ts
 ```
 
-该组合测试不会调用真实 Images API 或视觉 provider。只有在获得独立授权的 provider、凭据和测试额度后，才能另行执行真实 API E2E；Mock 和组合测试不能替代该证据。
+shipped provider 路由使用测试自有的 loopback HTTP server，只能作为组合证据，不能作为真实外部 provider E2E。只有在获得独立授权的 provider、凭据和测试额度后，才能另行执行真实 API E2E；Mock 和组合测试不能替代该证据。
 
 <a id="model-experience"></a>
 ## 模型体验

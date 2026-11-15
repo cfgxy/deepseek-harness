@@ -174,12 +174,16 @@ export async function resolveImageCapability(ctx, agent, size, quality, signal) 
     throw new ImageCapabilityError('CAPABILITY_UNAVAILABLE', '无法读取当前聊天模型的能力元数据。', { cause: error })
   }
 
-  const registry = ctx.imageCapabilities
+  const registry = ctx.get('imageCapabilities')
+  if (registry === undefined) {
+    throw new ImageCapabilityError('CAPABILITY_UNAVAILABLE', '图像 capability registry 尚未提供。')
+  }
   const candidates = [...await registry.list(current.provider)]
     .filter(candidate => candidate.provider === current.provider)
   const exact = candidates.filter(candidate => candidate.model === current.model)
   let selected
   if (exact.length === 1) selected = exact[0]
+  else if (exact.length === 0 && candidates.length === 1) selected = candidates[0]
   else {
     const selectedId = await askForCapability(
       ctx,
@@ -209,7 +213,8 @@ export async function resolveImageCapability(ctx, agent, size, quality, signal) 
   if (model.inputModalities?.includes('image') === true) {
     const exactReview = reviewCandidates.filter(candidate => candidate.model === current.model)
     if (exactReview.length === 1) review = exactReview[0]
-    else if (exactReview.length > 1 || reviewCandidates.length > 0) {
+    else if (exactReview.length === 0 && reviewCandidates.length === 1) review = reviewCandidates[0]
+    else if (exactReview.length > 1 || reviewCandidates.length > 1) {
       const selectedId = await askForReviewCapability(
         ctx,
         agent,
@@ -227,7 +232,8 @@ export async function resolveImageCapability(ctx, agent, size, quality, signal) 
     if (review === undefined) {
       const exactReview = reviewCandidates.filter(candidate => candidate.model === selected.model)
       if (exactReview.length === 1) review = exactReview[0]
-      else if (exactReview.length > 1 || reviewCandidates.length > 0) {
+      else if (exactReview.length === 0 && reviewCandidates.length === 1) review = reviewCandidates[0]
+      else if (exactReview.length > 1 || reviewCandidates.length > 1) {
         const selectedId = await askForReviewCapability(
           ctx,
           agent,

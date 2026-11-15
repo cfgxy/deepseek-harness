@@ -28,6 +28,7 @@ function capability(overrides = {}) {
 
 function context(candidates, answer, modelInfo = {}) {
   const asked = []
+  const imageCapabilities = { list: async () => candidates }
   return {
     asked,
     llm: {
@@ -37,7 +38,8 @@ function context(candidates, answer, modelInfo = {}) {
       },
       resolveModelInfo: async (provider, model) => ({ provider, id: model, name: model, ...modelInfo }),
     },
-    imageCapabilities: { list: async () => candidates },
+    imageCapabilities,
+    get: service => service === 'imageCapabilities' ? imageCapabilities : undefined,
     userQuestions: {
       ask: async request => {
         asked.push(request)
@@ -80,16 +82,11 @@ test('多个 exact capability 通过用户问询选择', async () => {
   ])
 })
 
-test('当前模型没有 exact capability 时即使只有一个候选也先问询', async () => {
-  const ctx = context([capability({ model: 'other-model' })], request => ({
-    answers: [{ id: request.questions[0].id, selected: ['image-a'] }],
-  }))
+test('当前模型没有 exact capability 时唯一 provider 候选自动选择且不问询', async () => {
+  const ctx = context([capability({ model: 'other-model' })])
   const result = await resolveImageCapability(ctx, agent(), '1024x1024', 'medium')
   assert.equal(result.capability.id, 'image-a')
-  assert.equal(ctx.asked.length, 1)
-  assert.deepEqual(ctx.asked[0].questions[0].options, [
-    { label: 'image-a', description: 'Provider A image capability' },
-  ])
+  assert.equal(ctx.asked.length, 0)
 })
 
 test('能力未知时先通过问询澄清而不按模型名称猜测', async () => {
@@ -142,8 +139,7 @@ test('当前聊天模型声明 image 输入时优先使用当前模型视觉审�
   const result = await resolveImageCapability(ctx, agent(), '1024x1024', 'medium')
   assert.equal(result.capability.id, 'image-a')
   assert.equal(result.review.id, 'review-current')
-  assert.equal(ctx.asked.length, 1)
-  assert.equal(ctx.asked[0].questions[0].id, 'image-capability')
+  assert.equal(ctx.asked.length, 0)
 })
 
 test('正式 registry 的 provider 注册随 Cordis effect 卸载', async () => {

@@ -32,7 +32,7 @@ The Web/Desktop shipped bundle always includes the plugin row. Configure the exi
 <a id="configuration"></a>
 ## Configuration
 
-The default built-in row contains no endpoint, model, or credential values. An unconfigured installation still loads the plugin and first attempts to inherit the current chat provider. If that provider has no unique provider-owned image capability, the tool asks the user to clarify instead of guessing from a model name. Explicit endpoint, model, and credential references remain available as advanced overrides, and each role must be configured as a complete group. Credential fields name POSIX environment variables or DSH credential references; raw secrets remain owned by the provider or credential service and never enter ordinary settings or logs.
+The default built-in row contains no endpoint, model, or credential values. An unconfigured installation still loads the plugin and first attempts to inherit the current chat provider. A unique exact capability is selected automatically; when there is no exact match but the provider exposes exactly one capability, that capability is also selected without a prompt. Multiple candidates are presented through user questions, while an unavailable or unanswered selection returns a diagnostic instead of guessing from a model name. Explicit endpoint, model, and credential references remain available as advanced overrides, and each role must be configured as a complete group. Credential fields name POSIX environment variables or DSH credential references; raw secrets remain owned by the provider or credential service and never enter ordinary settings or logs.
 
 ```yaml
 - id: image-iterate-plugin
@@ -51,7 +51,7 @@ The default built-in row contains no endpoint, model, or credential values. An u
     outputFormat: png
 ```
 
-In explicit override mode, image and review credentials are resolved on every tool call, so credential rotation does not require a process restart. Keep the two references independent when image generation and visual review should have different access or audit scopes. In automatic mode, the provider owns the endpoint and credential while the plugin receives only controlled closures.
+In explicit override mode, image and review credentials are resolved on every tool call, so credential rotation does not require a process restart. Keep the two references independent when image generation and visual review should have different access or audit scopes. When both override groups and an agent provider route are available, the plugin registers a temporary provider-owned capability whose closures resolve those credentials and removes it in `finally`; a call without an agent retains the explicit direct fallback. In automatic mode, the provider owns the endpoint and credential while the plugin receives only controlled closures.
 
 <a id="provider-capability-registration"></a>
 ## Provider capability registration
@@ -59,7 +59,8 @@ In explicit override mode, image and review credentials are resolved on every to
 Provider plugins register controlled operations through the formal `ImageCapabilityRegistry`; they do not place endpoints or credentials in image-plugin settings. A provider registers generation and, when needed, an independent review route inside a Cordis effect so unloading the provider removes both routes:
 
 ```ts
-ctx.effect(() => ctx.imageCapabilities.register({
+const registry = provideImageCapabilityRegistry(ctx)
+ctx.effect(() => registry.register({
   id: 'provider-image-route',
   provider: 'provider-id',
   model: 'declared-image-model',
@@ -69,7 +70,7 @@ ctx.effect(() => ctx.imageCapabilities.register({
 }))
 ```
 
-The plugin reads the current chat provider/model from the agent route and only auto-selects an exact generation route. If no exact route or multiple routes are available, it asks through `ctx.userQuestions.ask`. For review, a model whose resolved metadata explicitly includes `inputModalities: ['image']` is preferred; otherwise the plugin selects among review routes owned by the same provider and asks when the choice is ambiguous. Capability closures keep provider endpoint and credential handling outside the plugin.
+The plugin reads the current chat provider/model from the agent route. It auto-selects one exact generation route, or the provider's sole route when no exact route exists. Multiple candidates are presented through `ctx.userQuestions.ask`; no candidate or an unanswered prompt produces a diagnostic. For review, a model whose resolved metadata explicitly includes `inputModalities: ['image']` is preferred; otherwise the plugin selects among review routes owned by the same provider and asks when the choice is ambiguous. Capability closures keep provider endpoint and credential handling outside the plugin.
 
 <a id="failure-and-cost-boundaries"></a>
 ## Failure and cost boundaries
@@ -90,13 +91,14 @@ The pure HTTP and bounded-iteration tests run with provider mocks:
 node --test packages/bundle/image-iterate-plugin/test/*.test.mjs
 ```
 
-The shipped Web composition test loads the actual Web bundle, ModuleLoader registration, attachment loader, and official gallery path:
+The shipped Web composition tests load the actual Web bundle, ModuleLoader/profile registration, provider-owned capability route, attachment loader, and official gallery path:
 
 ```sh
+pnpm exec vitest run --config vitest.web.config.ts apps/web/tests/shipped-composition.e2e.ts
 pnpm exec vitest run --config vitest.web.config.ts apps/web/tests/image-iterate-client.e2e.ts
 ```
 
-This composition test does not call a real Images API or vision provider. A real API E2E remains unverified until a separately authorized provider, credential, and test quota are available; Mock and composition tests cannot substitute for that evidence.
+The shipped provider route uses a test-owned loopback HTTP server and is composition evidence, not a real external provider E2E. A real API E2E remains unverified until a separately authorized provider, credential, and test quota are available; Mock and composition tests cannot substitute for that evidence.
 
 <a id="model-experience"></a>
 ## Model Experience
