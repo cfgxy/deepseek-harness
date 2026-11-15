@@ -19,7 +19,7 @@ test('显式 image/review override 优先于自动 provider，并保留已发出
     .replace("import { HarnessError } from '@deepseek-ai/dsh-llm'", '')
     .replace("import { defineTool } from '@deepseek-ai/dsh-tools'", '')
     .replace(/import \{[\s\S]*?\} from '\.\/api\.js'/, '')
-    .replace("import { capabilityConfig, ImageCapabilityError, resolveImageCapability } from './capability.js'", '')
+    .replace(/import \{[\s\S]*?\} from '\.\/capability\.js'/, '')
     .replace('export const name', 'const name')
     .replace('export const inject', 'const inject')
     .replace('export const Config', 'const Config')
@@ -39,6 +39,7 @@ test('显式 image/review override 优先于自动 provider，并保留已发出
     IMAGE_GENERATION_OUTCOME_UNKNOWN: 'IMAGE_GENERATION_OUTCOME_UNKNOWN',
     IMAGE_GENERATION_OUTCOME_UNKNOWN_MESSAGE: '图像生成请求可能已被上游接受并产生计费，但结果无法确认。禁止自动重试；请先在上游控制台或账单记录中核对结果。',
     generateAndReview,
+    provideImageCapabilityRegistry: () => ({}),
     fetch: () => assert.fail('不应调用 fetch'),
   }
   vm.runInNewContext(transformed, context)

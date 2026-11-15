@@ -11,7 +11,7 @@ import {
   generateAndReview,
 } from './api.ts'
 import type { Config } from './index.ts'
-import { capabilityConfig, ImageCapabilityError, resolveImageCapability } from './capability.ts'
+import { capabilityConfig, ImageCapabilityError, provideImageCapabilityRegistry, resolveImageCapability } from './capability.ts'
 
 export const name = 'image-iterate-plugin'
 export const inject = ['tools', 'attachments', 'credentials', 'llm', 'userQuestions']
@@ -172,6 +172,7 @@ function imageFromMeta(value: unknown): ImageAttachmentRef | undefined {
 
 /** Register the image generation and independent visual review tool. */
 export function apply(ctx: Context, config: Config): void {
+  provideImageCapabilityRegistry(ctx)
   ctx.effect(() => ctx.tools.register(defineTool({
     name: 'generate_image_with_review',
     description: 'Generate one image through the current chat provider when it exposes a provider-owned image capability, review it against explicit acceptance criteria, and retry only when that review rejects it. Explicit endpoint/model/credential overrides remain available for advanced deployments; ask the user when capability selection is ambiguous. The configured limit prevents unbounded paid requests.',
@@ -211,7 +212,7 @@ export function apply(ctx: Context, config: Config): void {
         }
         const selected = automatic === undefined
           ? undefined
-          : capabilityConfig(automatic.capability, resolvedSize, resolvedQuality, outputFormat)
+          : capabilityConfig(automatic.capability, automatic.review, resolvedSize, resolvedQuality, outputFormat)
         const image = imageOverride
           ? {
             baseUrl: config.imageBaseUrl,

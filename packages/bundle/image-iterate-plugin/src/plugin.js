@@ -8,7 +8,7 @@ import {
   ImageIterateError,
   generateAndReview,
 } from './api.js'
-import { capabilityConfig, ImageCapabilityError, resolveImageCapability } from './capability.js'
+import { capabilityConfig, ImageCapabilityError, provideImageCapabilityRegistry, resolveImageCapability } from './capability.js'
 
 export const name = 'image-iterate-plugin'
 export const inject = ['tools', 'attachments', 'credentials', 'llm', 'userQuestions']
@@ -124,6 +124,7 @@ class ImageGenerationOutcomeUnknownError extends HarnessError {
 }
 
 export function apply(ctx, config) {
+  provideImageCapabilityRegistry(ctx)
   return ctx.effect(() => ctx.tools.register(defineTool({
     name: 'generate_image_with_review',
     description: 'Generate one image through the current chat provider when it exposes a provider-owned image capability, review it against explicit acceptance criteria, and retry only when that review rejects it. Explicit endpoint/model/credential overrides remain available for advanced deployments; ask the user when capability selection is ambiguous. The configured limit prevents unbounded paid requests.',
@@ -162,7 +163,13 @@ export function apply(ctx, config) {
         }
         const selected = automatic === undefined
           ? undefined
-          : capabilityConfig(automatic.capability, resolvedSize, resolvedQuality, outputFormat)
+          : capabilityConfig(
+              automatic.capability,
+              automatic.review,
+              resolvedSize,
+              resolvedQuality,
+              outputFormat,
+            )
         const image = imageOverride
           ? {
               baseUrl: config.imageBaseUrl,

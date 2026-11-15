@@ -10,7 +10,8 @@ import type { Context } from '@deepseek-ai/cordis'
 import z from '@deepseek-ai/schemastery'
 import { apply as applyPlugin } from './plugin.ts'
 
-export type { ImageCapability, ImageCapabilityRegistry } from './capability.ts'
+export type { ImageCapability, ImageCapabilityRegistry, ImageReviewCapability } from './capability.ts'
+export { ImageCapabilityRegistryService, provideImageCapabilityRegistry } from './capability.ts'
 
 /** Stable Cordis plugin name. */
 export const name = 'image-iterate-plugin'

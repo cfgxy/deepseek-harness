@@ -15,6 +15,7 @@ This bundle adds a built-in `generate_image_with_review` tool to the Web/Desktop
 
 - [Use this package](#use-this-package)
 - [Configuration](#configuration)
+- [Provider capability registration](#provider-capability-registration)
 - [Failure and cost boundaries](#failure-and-cost-boundaries)
 - [Verification](#verification)
 - [Model Experience](#model-experience)
@@ -51,6 +52,24 @@ The default built-in row contains no endpoint, model, or credential values. An u
 ```
 
 In explicit override mode, image and review credentials are resolved on every tool call, so credential rotation does not require a process restart. Keep the two references independent when image generation and visual review should have different access or audit scopes. In automatic mode, the provider owns the endpoint and credential while the plugin receives only controlled closures.
+
+<a id="provider-capability-registration"></a>
+## Provider capability registration
+
+Provider plugins register controlled operations through the formal `ImageCapabilityRegistry`; they do not place endpoints or credentials in image-plugin settings. A provider registers generation and, when needed, an independent review route inside a Cordis effect so unloading the provider removes both routes:
+
+```ts
+ctx.effect(() => ctx.imageCapabilities.register({
+  id: 'provider-image-route',
+  provider: 'provider-id',
+  model: 'declared-image-model',
+  label: 'Provider image route',
+  generate: request => providerGenerate(request),
+  review: request => providerReview(request),
+}))
+```
+
+The plugin reads the current chat provider/model from the agent route and only auto-selects an exact generation route. If no exact route or multiple routes are available, it asks through `ctx.userQuestions.ask`. For review, a model whose resolved metadata explicitly includes `inputModalities: ['image']` is preferred; otherwise the plugin selects among review routes owned by the same provider and asks when the choice is ambiguous. Capability closures keep provider endpoint and credential handling outside the plugin.
 
 <a id="failure-and-cost-boundaries"></a>
 ## Failure and cost boundaries

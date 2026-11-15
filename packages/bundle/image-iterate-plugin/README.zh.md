@@ -15,6 +15,7 @@ kind: "package-bundle"
 
 - [使用本包](#use-this-package)
 - [配置](#configuration)
+- [Provider capability 注册](#provider-capability-registration)
 - [失败与费用边界](#failure-and-cost-boundaries)
 - [验证](#verification)
 - [模型体验](#model-experience)
@@ -51,6 +52,24 @@ kind: "package-bundle"
 ```
 
 显式覆盖模式下，插件在每次工具调用时重新解析图像和审核凭据，因此凭据轮换无需重启进程。如果图像生成与视觉审核需要不同的访问权限或审计范围，应保持两个引用独立。自动继承模式下，provider 负责 endpoint 和凭据，插件只接收受控 closure。
+
+<a id="provider-capability-registration"></a>
+## Provider capability 注册
+
+Provider 插件通过正式的 `ImageCapabilityRegistry` 注册受控操作，不把 endpoint 或凭据写入 image 插件配置。Provider 应在 Cordis effect 中注册图像生成和必要的独立审核路由；卸载 provider 时，effect 会移除对应路由：
+
+```ts
+ctx.effect(() => ctx.imageCapabilities.register({
+  id: 'provider-image-route',
+  provider: 'provider-id',
+  model: 'declared-image-model',
+  label: 'Provider image route',
+  generate: request => providerGenerate(request),
+  review: request => providerReview(request),
+}))
+```
+
+插件从 agent 路由读取当前聊天 provider/model，并且只自动选择 model 完全匹配的图像生成路由。没有 exact 路由或存在多个路由时，通过 `ctx.userQuestions.ask` 询问用户。视觉审核方面，只有解析后的模型 metadata 明确包含 `inputModalities: ['image']` 时才优先复用当前模型；否则从同一 provider 所有审核路由中选择，无法安全决策时询问用户。Capability closure 将 provider 的 endpoint 和凭据处理留在插件之外。
 
 <a id="failure-and-cost-boundaries"></a>
 ## 失败与费用边界
