@@ -2846,6 +2846,7 @@ export const CLIENT_SLOT_API: readonly ClientSlotEntry[] = [
     slotInject: '',
     declaredBy: 'an entry in \'main\' (client-ui-plugin-manager), so it exists while that entry is mounted',
     occupants: [
+      'image-iterate-plugin SettingsCard id \'image-iterate-plugin\'',
       'client-ui-settings-agent-loop AgentLoopCard id \'agent-loop\'',
       'client-ui-settings-shell ShellCard id \'shell\'',
       'client-ui-settings-subagent SubagentCard id \'subagent\'',

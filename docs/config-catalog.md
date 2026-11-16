@@ -1893,23 +1893,23 @@ export interface TlsConfig {
 
 ## `@deepseek-ai/dsh-image-iterate-plugin`
 
-- `inject`: `tools` · `attachments` · `credentials`
-- `source`: [`packages/bundle/image-iterate-plugin/src/index.ts:20`](../packages/bundle/image-iterate-plugin/src/index.ts)
+- `inject`: `tools` · `attachments` · `credentials` · `llm` · `userQuestions`
+- `source`: [`packages/bundle/image-iterate-plugin/src/index.ts:23`](../packages/bundle/image-iterate-plugin/src/index.ts)
 
 ```ts config-catalog
-/** Configuration for image generation and independent visual review requests. */
+/** Configuration for automatic provider-owned image capability selection and optional advanced overrides. */
 export interface Config {
-  /** OpenAI-compatible base URL for `POST /images/generations`. */
+  /** Optional advanced override endpoint for `POST /images/generations`; empty uses the current provider capability. */
   imageBaseUrl: string
-  /** Image model name accepted by the configured image provider. */
+  /** Optional advanced override image model. */
   imageModel: string
-  /** Environment variable or DSH credential reference for image requests. */
+  /** Optional environment variable or DSH credential reference for the image override. */
   imageCredential: string
-  /** OpenAI-compatible base URL for `POST /chat/completions`. */
+  /** Optional advanced override endpoint for `POST /chat/completions`; empty uses the current provider capability. */
   reviewBaseUrl: string
-  /** Vision model name accepted by the configured review provider. */
+  /** Optional advanced override vision model. */
   reviewModel: string
-  /** Environment variable or DSH credential reference for review requests. */
+  /** Optional environment variable or DSH credential reference for the review override. */
   reviewCredential: string
   /** Maximum number of paid image generations for one tool call. */
   maxIterations: number

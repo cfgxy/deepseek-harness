@@ -6,6 +6,64 @@ export class ImageCapabilityError extends Error {
   }
 }
 
+export class ImageCapabilityRegistryService {
+  generation = new Map()
+  review = new Map()
+
+  register(capability) {
+    this.assertUnique(this.generation, capability)
+    const review = capability.review === undefined ? undefined : {
+      id: capability.id,
+      provider: capability.provider,
+      model: capability.model,
+      label: capability.label,
+      review: capability.review,
+    }
+    if (review !== undefined) this.assertUnique(this.review, review)
+    this.generation.set(capability.id, capability)
+    if (review !== undefined) this.review.set(review.id, review)
+    return () => {
+      if (this.generation.get(capability.id) !== capability) return
+      this.generation.delete(capability.id)
+      if (review !== undefined && this.review.get(review.id) === review) this.review.delete(review.id)
+    }
+  }
+
+  registerReview(capability) {
+    this.assertUnique(this.review, capability)
+    this.review.set(capability.id, capability)
+    return () => {
+      if (this.review.get(capability.id) === capability) this.review.delete(capability.id)
+    }
+  }
+
+  list(provider) {
+    return [...this.generation.values()].filter(capability => capability.provider === provider)
+  }
+
+  listReviews(provider) {
+    return [...this.review.values()].filter(capability => capability.provider === provider)
+  }
+
+  assertUnique(map, capability) {
+    if (capability.id.trim() === '' || capability.provider.trim() === '' || capability.model.trim() === '') {
+      throw new ImageCapabilityError('CAPABILITY_UNAVAILABLE', '图像 capability 的 id、provider 和 model 不能为空。')
+    }
+    const existing = map.get(capability.id)
+    if (existing !== undefined && existing !== capability) {
+      throw new ImageCapabilityError('CAPABILITY_UNAVAILABLE', `图像 capability id「${capability.id}」已注册。`)
+    }
+  }
+}
+
+export function provideImageCapabilityRegistry(ctx) {
+  const existing = ctx.get('imageCapabilities')
+  if (existing !== undefined) return existing
+  const registry = new ImageCapabilityRegistryService()
+  ctx.provide('imageCapabilities', registry)
+  return registry
+}
+
 function modelLabel(info) {
   return info.name === info.id ? info.id : `${info.name} (${info.id})`
 }
@@ -61,6 +119,20 @@ async function askForCapability(ctx, agent, signal, candidates, provider, curren
   })
 }
 
+async function askForReviewCapability(ctx, agent, signal, candidates, provider, currentModel) {
+  return askSelection(ctx, agent, signal, {
+    id: 'image-review-capability',
+    header: '视觉审核能力',
+    question: candidates.length === 0
+      ? `当前聊天 provider「${provider}」的模型「${currentModel}」没有声明可用的视觉审核能力，请提供已注册的 capability id。`
+      : '请选择用于视觉审核的 provider-owned capability。',
+    detail: '当前模型只有在 provider 明确声明支持 image 输入时才会被优先复用；插件不会读取或记录原始凭据。',
+    ...(candidates.length === 0 ? {} : {
+      options: candidates.map(candidate => ({ label: candidate.id, description: candidate.label })),
+    }),
+  })
+}
+
 async function resolveControl(ctx, agent, signal, capability, kind, value) {
   const options = kind === 'size' ? capability.sizes : capability.qualities
   if (value.trim() !== '') {
@@ -102,12 +174,16 @@ export async function resolveImageCapability(ctx, agent, size, quality, signal) 
     throw new ImageCapabilityError('CAPABILITY_UNAVAILABLE', '无法读取当前聊天模型的能力元数据。', { cause: error })
   }
 
-  const registry = ctx.imageCapabilities
-  const candidates = registry === undefined ? [] : [...await registry.list(current.provider)]
+  const registry = ctx.get('imageCapabilities')
+  if (registry === undefined) {
+    throw new ImageCapabilityError('CAPABILITY_UNAVAILABLE', '图像 capability registry 尚未提供。')
+  }
+  const candidates = [...await registry.list(current.provider)]
     .filter(candidate => candidate.provider === current.provider)
   const exact = candidates.filter(candidate => candidate.model === current.model)
   let selected
   if (exact.length === 1) selected = exact[0]
+  else if (exact.length === 0 && candidates.length === 1) selected = candidates[0]
   else {
     const selectedId = await askForCapability(
       ctx,
@@ -123,12 +199,66 @@ export async function resolveImageCapability(ctx, agent, size, quality, signal) 
   if (selected === undefined) {
     throw new ImageCapabilityError('CAPABILITY_UNAVAILABLE', '问询选择的图像 capability 不存在或不属于当前 provider。')
   }
+  const reviewCandidates = typeof registry.listReviews === 'function'
+    ? [...await registry.listReviews(current.provider)].filter(candidate => candidate.provider === current.provider)
+    : []
+  const inlineReview = selected.review === undefined ? undefined : {
+    id: selected.id,
+    provider: selected.provider,
+    model: selected.model,
+    label: selected.label,
+    review: selected.review,
+  }
+  let review
+  if (model.inputModalities?.includes('image') === true) {
+    if (inlineReview?.model === current.model) {
+      review = inlineReview
+    } else {
+      const exactReview = reviewCandidates.filter(candidate => candidate.model === current.model)
+      if (exactReview.length === 1) review = exactReview[0]
+      else if (exactReview.length === 0 && reviewCandidates.length === 1) review = reviewCandidates[0]
+      else if (exactReview.length > 1 || reviewCandidates.length > 1) {
+        const selectedId = await askForReviewCapability(
+          ctx,
+          agent,
+          signal,
+          exactReview.length > 1 ? exactReview : reviewCandidates,
+          current.provider,
+          current.model,
+        )
+        const selectable = exactReview.length > 1 ? exactReview : reviewCandidates
+        review = selectable.find(candidate => candidate.id === selectedId)
+      }
+    }
+  } else {
+    review = inlineReview
+    if (review === undefined) {
+      const exactReview = reviewCandidates.filter(candidate => candidate.model === selected.model)
+      if (exactReview.length === 1) review = exactReview[0]
+      else if (exactReview.length === 0 && reviewCandidates.length === 1) review = reviewCandidates[0]
+      else if (exactReview.length > 1 || reviewCandidates.length > 1) {
+        const selectedId = await askForReviewCapability(
+          ctx,
+          agent,
+          signal,
+          exactReview.length > 1 ? exactReview : reviewCandidates,
+          current.provider,
+          selected.model,
+        )
+        const selectable = exactReview.length > 1 ? exactReview : reviewCandidates
+        review = selectable.find(candidate => candidate.id === selectedId)
+      }
+    }
+  }
+  if (review === undefined) {
+    throw new ImageCapabilityError('CAPABILITY_UNAVAILABLE', '当前 provider 没有可用的视觉审核 capability。')
+  }
   const resolvedSize = await resolveControl(ctx, agent, signal, selected, 'size', size)
   const resolvedQuality = await resolveControl(ctx, agent, signal, selected, 'quality', quality)
-  return { capability: selected, model, size: resolvedSize, quality: resolvedQuality }
+  return { capability: selected, review, model, size: resolvedSize, quality: resolvedQuality }
 }
 
-export function capabilityConfig(capability, size, quality, outputFormat) {
+export function capabilityConfig(capability, review, size, quality, outputFormat) {
   return {
     image: {
       generate: (prompt, signal) => capability.generate({
@@ -140,7 +270,7 @@ export function capabilityConfig(capability, size, quality, outputFormat) {
       }),
     },
     review: {
-      review: (image, acceptanceCriteria, signal) => capability.review({
+      review: (image, acceptanceCriteria, signal) => review.review({
         image,
         acceptanceCriteria,
         ...(signal === undefined ? {} : { signal }),

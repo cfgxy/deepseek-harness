@@ -1,3 +1,4 @@
+import { createServer } from 'node:http'
 import { executeToolFixture, executeModelToolFixture } from '@deepseek-ai/dsh-tool-testkit'
 // Boots the shipped Web composition over the built dist this lane already uses
 // and asserts its catalog, defaults, Loader lifecycle, and one complete Auto
@@ -10,6 +11,8 @@ import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { afterEach, expect, it } from 'vitest'
 import type { Agent } from '@deepseek-ai/dsh-agent'
+import { AttachmentId } from '@deepseek-ai/dsh-attachment'
+import type { ImageMediaType } from '@deepseek-ai/dsh-attachment'
 import { LlmAdapter, ToolCallId } from '@deepseek-ai/dsh-llm'
 import type { GenerateOptions, LlmResolvedModelInfo, StreamChunk } from '@deepseek-ai/dsh-llm'
 import { canonicalPath, writableRoots } from '@deepseek-ai/dsh-sandbox'
@@ -36,6 +39,10 @@ const HEADLESS_PATCH_PATH = join(REPO_ROOT, 'packages/bundle/headless/cordis.pat
 const AUTO_PROVIDER = 'shipped-auto-review-test'
 const AUTO_MODEL = 'same-route'
 const AUTO_CALL_ID = ToolCallId('shipped-auto-review-denied-delete')
+const IMAGE_PROVIDER_FIXTURE = fileURLToPath(new URL('./fixtures/plugins/fixture-image-provider', import.meta.url))
+const IMAGE_PROVIDER = 'deepseek-official'
+const IMAGE_MODEL = 'deepseek-v4-flash'
+const IMAGE_BYTES = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII='
 const AUTO_RAW_REASON = `  direct user authorized inspection only\nTEST_ONLY_SECRET_${'x'.repeat(16_384)}  `
 const AUTO_FINAL_TEXT = 'SHIPPED_AUTO_REVIEW_REJECTION_OBSERVED'
 const AUTO_CHILD_AUTHORIZED = 'AUTO_CHILD_AUTHORIZED'
@@ -478,6 +485,7 @@ const EXPECTED_TOOLS = [
   'create_goal',
   'edit',
   'exit_plan_mode',
+  'generate_image_with_review',
   'get_goal',
   'interrupt_agent',
   'job_kill',
@@ -593,7 +601,7 @@ it('assembles the shipped Web transport, catalog, guidance, and defaults', async
     }
   `)
   // The directory tool is global; the deployment's default preset supplies the agent's remaining tools.
-  expect(ctx.tools.schemas().map(schema => schema.name)).toEqual(['working_directory'])
+  expect(ctx.tools.schemas().map(schema => schema.name)).toEqual(['working_directory', 'generate_image_with_review'])
   const handle = await ctx.agents.create({
     sessionId: SessionId('shipped-composition'),
     setup: agentCtx => ctx.agentPresets.mount(agentCtx).then(() => undefined),
@@ -664,6 +672,119 @@ it('ships PTC with run_code but without the general workflow SDK binding', async
     expect(sdk).not.toContain('  workflow: {')
   } finally {
     await handle.dispose()
+  }
+}, 120_000)
+
+it('routes a shipped Loader/profile provider capability through image generation, review, and attachment persistence', async () => {
+  const requests: Array<{ path: string; authorization: string | null; body: Record<string, unknown> }> = []
+  const server = createServer((request, response) => {
+    void (async () => {
+      const chunks: Buffer[] = []
+      for await (const chunk of request) chunks.push(Buffer.from(chunk as Uint8Array))
+      const body = JSON.parse(Buffer.concat(chunks).toString('utf8')) as Record<string, unknown>
+      requests.push({
+        path: request.url ?? '',
+        authorization: request.headers.authorization ?? null,
+        body,
+      })
+      response.setHeader('content-type', 'application/json')
+      if (request.url === '/images/generations') {
+        response.end(JSON.stringify({ data: [{ b64_json: IMAGE_BYTES }] }))
+        return
+      }
+      if (request.url === '/chat/completions') {
+        response.end(JSON.stringify({ choices: [{ message: { content: JSON.stringify({ accepted: true, feedback: 'fixture accepted' }) } }] }))
+        return
+      }
+      response.statusCode = 404
+      response.end(JSON.stringify({ error: 'not found' }))
+    })().catch((error) => {
+      response.statusCode = 500
+      response.end(JSON.stringify({ error: error instanceof Error ? error.message : String(error) }))
+    })
+  })
+  await new Promise<void>((resolve, reject) => {
+    server.once('error', reject)
+    server.listen(0, '127.0.0.1', () => resolve())
+  })
+  const address = server.address()
+  if (address === null || typeof address === 'string') throw new Error('image fixture server did not expose an address')
+  const imagePluginDir = fileURLToPath(new URL('../../../packages/bundle/image-iterate-plugin', import.meta.url))
+  const previousEndpoint = process.env.DSH_IMAGE_FIXTURE_BASE_URL
+  process.env.DSH_IMAGE_FIXTURE_BASE_URL = `http://127.0.0.1:${String(address.port)}/`
+  try {
+    scaffold = await launchWebScaffold({
+      deepSeekMissingCredential: true,
+      profile: {
+        packages: [
+          { dir: imagePluginDir, enabled: false },
+          { dir: IMAGE_PROVIDER_FIXTURE, enabled: true },
+        ],
+      },
+    })
+    const ctx = scaffold.ctx
+    const registry = ctx.get('imageCapabilities') as { list(provider: string): readonly { id: string }[] }
+    expect(registry.list(IMAGE_PROVIDER).map(capability => capability.id)).toEqual(['fixture-image-route'])
+    const providerEntry = [...ctx.loader.entries()].find(entry => entry.options.id === 'fixture-image-provider')
+    if (providerEntry === undefined) throw new Error('shipped image provider Loader entry is missing')
+
+    const handle = await ctx.agents.create({
+      sessionId: SessionId('shipped-image-composition'),
+      meta: { cwd: scaffold.workspaceCwd },
+      agentOptions: { provider: IMAGE_PROVIDER, model: IMAGE_MODEL },
+      setup: agentCtx => ctx.agentPresets.mount(agentCtx).then(() => undefined),
+    })
+    try {
+      const result = await executeToolFixture(ctx, {
+        signal: new AbortController().signal,
+        callId: ToolCallId('shipped-image-generation'),
+        name: 'generate_image_with_review',
+        arguments: { prompt: 'a blue square', acceptance_criteria: 'must be blue' },
+        agent: handle.agent,
+      })
+      expect(result.isError).toBe(false)
+      const output = JSON.parse(result.content.find(block => block.type === 'text')?.text ?? '') as {
+        image: { attachmentId: string; bytes: number; width: number; height: number; mediaType: ImageMediaType }
+        accepted: boolean
+        iteration: number
+      }
+      expect(output).toMatchObject({
+        accepted: true,
+        iteration: 1,
+        image: { width: 1, height: 1, mediaType: 'image/webp' },
+      })
+      expect(output.image.bytes).toBeGreaterThan(0)
+      expect(output.image.attachmentId).toMatch(/^sha256:/u)
+      expect(result.meta).toMatchObject({ image: output.image })
+      const stored = await ctx.attachments.readImage({
+        ...output.image,
+        attachmentId: AttachmentId(output.image.attachmentId),
+      })
+      expect(stored.ref).toMatchObject(output.image)
+      expect(stored.data.byteLength).toBe(output.image.bytes)
+    } finally {
+      await handle.dispose()
+    }
+
+    expect(requests.map(request => request.path)).toEqual(['/images/generations', '/chat/completions'])
+    expect(requests.every(request => request.authorization === 'Bearer fixture-token')).toBe(true)
+    expect(requests[0]?.body).toMatchObject({
+      model: IMAGE_MODEL,
+      prompt: 'a blue square',
+      n: 1,
+      size: '1024x1024',
+      quality: 'medium',
+      output_format: 'png',
+    })
+    expect(requests[1]?.body).toMatchObject({ model: 'fixture-vision', temperature: 0 })
+
+    await providerEntry.update({ disabled: true })
+    await ctx.loader.await()
+    expect(registry.list(IMAGE_PROVIDER)).toEqual([])
+  } finally {
+    if (previousEndpoint === undefined) Reflect.deleteProperty(process.env, 'DSH_IMAGE_FIXTURE_BASE_URL')
+    else process.env.DSH_IMAGE_FIXTURE_BASE_URL = previousEndpoint
+    await new Promise<void>((resolve, reject) => server.close(error => error === undefined ? resolve() : reject(error)))
   }
 }, 120_000)
 
