@@ -6,7 +6,7 @@
  * @module @deepseek-ai/dsh-image-iterate-plugin
  */
 
-import type { Context } from '@deepseek-ai/cordis'
+import type { Context, Volatile } from '@deepseek-ai/cordis'
 import z from '@deepseek-ai/schemastery'
 import { apply as applyPlugin } from './plugin.ts'
 
@@ -22,42 +22,42 @@ export const inject = ['tools', 'attachments', 'credentials', 'llm', 'userQuesti
 /** Configuration for automatic provider-owned image capability selection and optional advanced overrides. */
 export interface Config {
   /** Optional advanced override endpoint for `POST /images/generations`; empty uses the current provider capability. */
-  imageBaseUrl: string
+  imageBaseUrl: Volatile<string>
   /** Optional advanced override image model. */
-  imageModel: string
+  imageModel: Volatile<string>
   /** Optional environment variable or DSH credential reference for the image override. */
-  imageCredential: string
+  imageCredential: Volatile<string>
   /** Optional advanced override endpoint for `POST /chat/completions`; empty uses the current provider capability. */
-  reviewBaseUrl: string
+  reviewBaseUrl: Volatile<string>
   /** Optional advanced override vision model. */
-  reviewModel: string
+  reviewModel: Volatile<string>
   /** Optional environment variable or DSH credential reference for the review override. */
-  reviewCredential: string
+  reviewCredential: Volatile<string>
   /** Maximum number of paid image generations for one tool call. */
-  maxIterations: number
+  maxIterations: Volatile<number>
   /** Per-request timeout in milliseconds. */
-  timeoutMs: number
+  timeoutMs: Volatile<number>
   /** Default image size passed to the image provider. */
-  defaultSize: string
+  defaultSize: Volatile<string>
   /** Default image quality passed to the image provider. */
-  defaultQuality: string
+  defaultQuality: Volatile<string>
   /** Attachment format used for generated images. */
-  outputFormat: string
+  outputFormat: Volatile<string>
 }
 
 /** Validate and default the plugin configuration before the Host implementation runs. */
-export const Config: z<Config> = z.object({
-  imageBaseUrl: z.string().default(''),
-  imageModel: z.string().default(''),
-  imageCredential: z.string().default(''),
-  reviewBaseUrl: z.string().default(''),
-  reviewModel: z.string().default(''),
-  reviewCredential: z.string().default(''),
-  maxIterations: z.number().default(2),
-  timeoutMs: z.number().default(120000),
-  defaultSize: z.string().default('1024x1024'),
-  defaultQuality: z.string().default('medium'),
-  outputFormat: z.string().default('png'),
+export const Config = z.object({
+  imageBaseUrl: z.string().default('').volatile(),
+  imageModel: z.string().default('').volatile(),
+  imageCredential: z.string().default('').volatile(),
+  reviewBaseUrl: z.string().default('').volatile(),
+  reviewModel: z.string().default('').volatile(),
+  reviewCredential: z.string().default('').volatile(),
+  maxIterations: z.number().default(2).volatile(),
+  timeoutMs: z.number().default(120000).volatile(),
+  defaultSize: z.string().default('1024x1024').volatile(),
+  defaultQuality: z.string().default('medium').volatile(),
+  outputFormat: z.string().default('png').volatile(),
 })
 
 /**

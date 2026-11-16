@@ -5,18 +5,19 @@ import { apply } from '../src/plugin.js'
 import { provideImageCapabilityRegistry } from '../src/capability.js'
 
 function config() {
+  const volatile = value => ({ get: () => value })
   return {
-    imageBaseUrl: '',
-    imageModel: '',
-    imageCredential: '',
-    reviewBaseUrl: '',
-    reviewModel: '',
-    reviewCredential: '',
-    maxIterations: 1,
-    timeoutMs: 1000,
-    defaultSize: '1024x1024',
-    defaultQuality: 'medium',
-    outputFormat: 'png',
+    imageBaseUrl: volatile(''),
+    imageModel: volatile(''),
+    imageCredential: volatile(''),
+    reviewBaseUrl: volatile(''),
+    reviewModel: volatile(''),
+    reviewCredential: volatile(''),
+    maxIterations: volatile(1),
+    timeoutMs: volatile(1000),
+    defaultSize: volatile('1024x1024'),
+    defaultQuality: volatile('medium'),
+    outputFormat: volatile('png'),
   }
 }
 

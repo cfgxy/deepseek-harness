@@ -21,6 +21,20 @@ export const inject = ['tools', 'attachments', 'credentials', 'llm', 'userQuesti
 
 type OutputFormat = 'png' | 'webp' | 'jpeg'
 
+type ConfigSnapshot = {
+  imageBaseUrl: string
+  imageModel: string
+  imageCredential: string
+  reviewBaseUrl: string
+  reviewModel: string
+  reviewCredential: string
+  maxIterations: number
+  timeoutMs: number
+  defaultSize: string
+  defaultQuality: string
+  outputFormat: string
+}
+
 type ImageToolArgs = {
   prompt: string
   acceptance_criteria: string
@@ -77,25 +91,38 @@ const resultSchema = {
   },
 }
 
-function ensureConfig(config: Config): OutputFormat {
-  if (!Number.isInteger(config.maxIterations) || config.maxIterations < 1 || config.maxIterations > 3) {
+function ensureConfig(config: Config): ConfigSnapshot {
+  const snapshot: ConfigSnapshot = {
+    imageBaseUrl: config.imageBaseUrl.get(),
+    imageModel: config.imageModel.get(),
+    imageCredential: config.imageCredential.get(),
+    reviewBaseUrl: config.reviewBaseUrl.get(),
+    reviewModel: config.reviewModel.get(),
+    reviewCredential: config.reviewCredential.get(),
+    maxIterations: config.maxIterations.get(),
+    timeoutMs: config.timeoutMs.get(),
+    defaultSize: config.defaultSize.get(),
+    defaultQuality: config.defaultQuality.get(),
+    outputFormat: config.outputFormat.get(),
+  }
+  if (!Number.isInteger(snapshot.maxIterations) || snapshot.maxIterations < 1 || snapshot.maxIterations > 3) {
     throw new ImageIterateError('INVALID_CONFIG', 'maxIterations 必须是 1 到 3 的整数。')
   }
-  if (!Number.isInteger(config.timeoutMs) || config.timeoutMs < 1000) {
+  if (!Number.isInteger(snapshot.timeoutMs) || snapshot.timeoutMs < 1000) {
     throw new ImageIterateError('INVALID_CONFIG', 'timeoutMs 必须是不小于 1000 的整数。')
   }
-  if (!['png', 'webp', 'jpeg'].includes(config.outputFormat)) {
+  if (!['png', 'webp', 'jpeg'].includes(snapshot.outputFormat)) {
     throw new ImageIterateError('INVALID_CONFIG', 'outputFormat 仅支持 png、webp 或 jpeg。')
   }
-  const imageOverride = [config.imageBaseUrl, config.imageModel, config.imageCredential]
-  const reviewOverride = [config.reviewBaseUrl, config.reviewModel, config.reviewCredential]
+  const imageOverride = [snapshot.imageBaseUrl, snapshot.imageModel, snapshot.imageCredential]
+  const reviewOverride = [snapshot.reviewBaseUrl, snapshot.reviewModel, snapshot.reviewCredential]
   for (const [role, values] of [['图像生成', imageOverride], ['视觉审核', reviewOverride]] as const) {
     const configured = values.filter(value => value.trim() !== '').length
     if (configured !== 0 && configured !== values.length) {
       throw new ImageIterateError('INVALID_CONFIG', `${role} override 必须同时配置 endpoint、model 和 credential reference。`)
     }
   }
-  return config.outputFormat as OutputFormat
+  return snapshot
 }
 
 async function resolveCredential(ctx: Context, reference: string, role: string): Promise<string> {
@@ -113,7 +140,7 @@ async function resolveCredential(ctx: Context, reference: string, role: string):
 function registerConfiguredCapability(
   ctx: Context,
   provider: string,
-  config: Config,
+  config: ConfigSnapshot,
   outputFormat: OutputFormat,
 ): () => void {
   const noPersist = async (_image: GeneratedImage, _iteration: number): Promise<never> => {
@@ -244,16 +271,17 @@ export function apply(ctx: Context, config: Config): void {
     async execute(args: ImageToolArgs, exec): Promise<ImageToolResult> {
       let configuredDisposer: (() => void) | undefined
       try {
-        const outputFormat = ensureConfig(config)
-        const imageOverride = config.imageBaseUrl.trim() !== ''
-        const reviewOverride = config.reviewBaseUrl.trim() !== ''
-        const size = args.size ?? config.defaultSize
-        const quality = args.quality ?? config.defaultQuality
+        const runtimeConfig = ensureConfig(config)
+        const outputFormat = runtimeConfig.outputFormat as OutputFormat
+        const imageOverride = runtimeConfig.imageBaseUrl.trim() !== ''
+        const reviewOverride = runtimeConfig.reviewBaseUrl.trim() !== ''
+        const size = args.size ?? runtimeConfig.defaultSize
+        const quality = args.quality ?? runtimeConfig.defaultQuality
         let automatic
         if (imageOverride && reviewOverride && exec.agent !== undefined) {
           const current = exec.agent.model.current()
           if (current?.provider !== undefined && current.provider.trim() !== '') {
-            configuredDisposer = registerConfiguredCapability(ctx, current.provider, config, outputFormat)
+            configuredDisposer = registerConfiguredCapability(ctx, current.provider, runtimeConfig, outputFormat)
             automatic = await resolveImageCapability(ctx, exec.agent, size, quality, exec.signal)
           }
         } else if (!imageOverride || !reviewOverride) {
@@ -271,9 +299,9 @@ export function apply(ctx: Context, config: Config): void {
           : capabilityConfig(automatic.capability, automatic.review, resolvedSize, resolvedQuality, outputFormat)
         const image = automatic === undefined && imageOverride
           ? {
-            baseUrl: config.imageBaseUrl,
-            model: config.imageModel,
-            token: await resolveCredential(ctx, config.imageCredential, '图像生成'),
+            baseUrl: runtimeConfig.imageBaseUrl,
+            model: runtimeConfig.imageModel,
+            token: await resolveCredential(ctx, runtimeConfig.imageCredential, '图像生成'),
             size: resolvedSize,
             quality: resolvedQuality,
             outputFormat,
@@ -283,15 +311,15 @@ export function apply(ctx: Context, config: Config): void {
             : selected.image
         const review = automatic === undefined && reviewOverride
           ? {
-            baseUrl: config.reviewBaseUrl,
-            model: config.reviewModel,
-            token: await resolveCredential(ctx, config.reviewCredential, '视觉审核'),
+            baseUrl: runtimeConfig.reviewBaseUrl,
+            model: runtimeConfig.reviewModel,
+            token: await resolveCredential(ctx, runtimeConfig.reviewCredential, '视觉审核'),
           }
           : selected === undefined
             ? (() => { throw new ImageCapabilityError('CAPABILITY_UNAVAILABLE', '审核 capability 未解析。') })()
             : selected.review
         const result = await generateAndReview({
-          maxIterations: config.maxIterations,
+          maxIterations: runtimeConfig.maxIterations,
           image,
           review,
         }, {
@@ -299,7 +327,7 @@ export function apply(ctx: Context, config: Config): void {
           acceptanceCriteria: args.acceptance_criteria,
         }, {
           signal: exec.signal,
-          timeoutMs: config.timeoutMs,
+          timeoutMs: runtimeConfig.timeoutMs,
           fetchImpl: fetch,
           imageOutcomeUnknown: cause => new ImageGenerationOutcomeUnknownError(cause),
           saveImage: async (image, iteration) => ctx.attachments.saveImage({

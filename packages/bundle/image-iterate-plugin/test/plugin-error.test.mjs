@@ -50,10 +50,11 @@ test('显式 image/review override 优先于自动 provider，并保留已发出
     credentials: { resolve: async () => ({ value: 'token' }) },
     attachments: { saveImage: async () => assert.fail('不应保存图片') },
   }
+  const volatile = value => ({ get: () => value })
   context.__apply(ctx, {
-    imageBaseUrl: 'https://image.example/v1', imageModel: 'image', imageCredential: 'IMAGE_TOKEN',
-    reviewBaseUrl: 'https://review.example/v1', reviewModel: 'review', reviewCredential: 'REVIEW_TOKEN',
-    maxIterations: 1, timeoutMs: 1_000, defaultSize: '1024x1024', defaultQuality: 'medium', outputFormat: 'png',
+    imageBaseUrl: volatile('https://image.example/v1'), imageModel: volatile('image'), imageCredential: volatile('IMAGE_TOKEN'),
+    reviewBaseUrl: volatile('https://review.example/v1'), reviewModel: volatile('review'), reviewCredential: volatile('REVIEW_TOKEN'),
+    maxIterations: volatile(1), timeoutMs: volatile(1_000), defaultSize: volatile('1024x1024'), defaultQuality: volatile('medium'), outputFormat: volatile('png'),
   })
   await assert.rejects(() => definition.execute({ prompt: 'square', acceptance_criteria: 'blue' }, { signal: new AbortController().signal }), error => {
     assert.equal(error instanceof HarnessError, true)
