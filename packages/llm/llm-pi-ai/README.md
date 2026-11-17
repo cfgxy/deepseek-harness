@@ -45,6 +45,11 @@ Each profile may set a `retryPolicy`; omission uses normal mode with five retrie
         apiKeyEnv: OPENAI_API_KEY
         baseURL: https://proxy.example.com:8443
         reasoning: high
+        image:
+          model: image-model
+          reviewModel: vision-model
+          sizes: [1024x1024]
+          qualities: [medium]
         requestImagePixelBudget: 4194304 # total pixels; 2048 by 2048 default
         requestImageMaxBytes: 1048576    # raw bytes before base64 expansion
         maxRequestImageBytes: 20971520   # accumulated base64 payload
@@ -83,6 +88,7 @@ Each profile may set a `retryPolicy`; omission uses normal mode with five retrie
 | `compat` | catalog detection | Wire-compatibility switches for unrecognized endpoints |
 | `defaultContextWindow` | `1,000,000` | Capacity fallback for undescribed models |
 | `defaultMaxTokens` | `128,000` | Output-cap fallback for undescribed models |
+| `image` | absent | Explicitly declares the provider-owned OpenAI-compatible image-generation model, with optional review model, sizes, and qualities |
 | `requestImagePixelBudget` | `4,194,304` | Total-pixel budget for each deterministic request image |
 | `requestImageMaxBytes` | `1 MiB` | Encoded-byte target for each request image before base64 expansion |
 | `maxRequestImageBytes` | `20 MiB` | Aggregate base64 image-payload bound; a request whose retained images exceed it fails with `IMAGE_OFFLOAD_REQUIRED` |
@@ -105,6 +111,12 @@ A profile's `models` list replaces the route's installed catalog rather than ext
 Exact-model metadata lists `reasoning.efforts` from least to greatest selectable effort. A configuration function can select from that list before `prepareCall()` validates the concrete effort. The adapter receives only the resolved controls. Selecting `off` does not guarantee disabled reasoning: a protocol that expresses it by omitting the reasoning field leaves the gateway's default in effect. Reasoning tokens at any selected level count toward the request's output cap.
 
 For self-hosted Chat Completions endpoints, `thinkingTokenBudgetField` selects the reasoning-budget parameter, and `vllmPriority` sets an integer scheduler priority when the server enables priority scheduling. Template arguments accept `$var: thinking.budget`. `openai-responses` gateways can set `supportsMaxOutputTokens: false` to omit `max_output_tokens`; Azure and Codex transports ignore this shared compatibility field. These controls are opt-in; catalog-owned Anthropic effort and fallback capabilities are not configurable switches.
+
+### Provider-owned image capability
+
+Only a provider with an explicit `image.model` declaration registers image-generation capability with the `ImageCapabilityRegistry`. The capability uses the current profile's `baseURL`, `apiKeyEnv` credential resolution, `headers`, and `llm-pi-ai/request-headers` waterfall, then calls the OpenAI-compatible `/images/generations` and `/chat/completions` endpoints. `reviewModel` is the fallback review route when no current vision model is available; a profile model declaring `input: [text, image]` is also registered as a review route, so the image plugin does not need duplicate endpoint, model, or credential settings. A profile update removes the old capabilities before rebuilding the new ones, and provider-fiber disposal removes every capability; a profile without `image` registers none.
+
+Generation responses must contain valid `b64_json`, and review responses must be `{"accepted": boolean, "feedback": string}`. Network failures, cancellation, malformed responses, and missing credentials fail with stable error codes; an unknown request outcome is never retried automatically.
 
 ### Change configuration at runtime
 

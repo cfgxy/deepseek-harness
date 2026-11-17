@@ -1896,33 +1896,34 @@ export interface TlsConfig {
 ## `@deepseek-ai/dsh-image-iterate-plugin`
 
 - `inject`: `tools` · `attachments` · `credentials` · `llm` · `userQuestions`
+- `refs`: `Volatile` (`@deepseek-ai/cordis`)
 - `source`: [`packages/bundle/image-iterate-plugin/src/index.ts:23`](../packages/bundle/image-iterate-plugin/src/index.ts)
 
 ```ts config-catalog
 /** Configuration for automatic provider-owned image capability selection and optional advanced overrides. */
 export interface Config {
   /** Optional advanced override endpoint for `POST /images/generations`; empty uses the current provider capability. */
-  imageBaseUrl: string
+  imageBaseUrl: Volatile<string>
   /** Optional advanced override image model. */
-  imageModel: string
+  imageModel: Volatile<string>
   /** Optional environment variable or DSH credential reference for the image override. */
-  imageCredential: string
+  imageCredential: Volatile<string>
   /** Optional advanced override endpoint for `POST /chat/completions`; empty uses the current provider capability. */
-  reviewBaseUrl: string
+  reviewBaseUrl: Volatile<string>
   /** Optional advanced override vision model. */
-  reviewModel: string
+  reviewModel: Volatile<string>
   /** Optional environment variable or DSH credential reference for the review override. */
-  reviewCredential: string
+  reviewCredential: Volatile<string>
   /** Maximum number of paid image generations for one tool call. */
-  maxIterations: number
+  maxIterations: Volatile<number>
   /** Per-request timeout in milliseconds. */
-  timeoutMs: number
+  timeoutMs: Volatile<number>
   /** Default image size passed to the image provider. */
-  defaultSize: string
+  defaultSize: Volatile<string>
   /** Default image quality passed to the image provider. */
-  defaultQuality: string
+  defaultQuality: Volatile<string>
   /** Attachment format used for generated images. */
-  outputFormat: string
+  outputFormat: Volatile<string>
 }
 ```
 <!-- END GENERATED config-catalog:@deepseek-ai/dsh-image-iterate-plugin -->
@@ -1999,7 +2000,7 @@ export interface Config extends ProtocolConfig, ModelListingConfig {
 
 - `inject`: `llm`
 - `refs`: `Api` (`@earendil-works/pi-ai`) · `CacheRetention` (`@earendil-works/pi-ai`) · `Model` (`@earendil-works/pi-ai`) · `ModelThinkingLevel` (`@earendil-works/pi-ai`) · `OpenAICompletionsCompat` (`@earendil-works/pi-ai`) · [`RetryPolicyConfig`](../packages/llm/llm/src/index.ts) · `ThinkingBudgets` (`@earendil-works/pi-ai`) · `Transport` (`@earendil-works/pi-ai`) · `Volatile` (`@deepseek-ai/cordis`)
-- `source`: [`packages/llm/llm-pi-ai/src/config.ts:222`](../packages/llm/llm-pi-ai/src/config.ts)
+- `source`: [`packages/llm/llm-pi-ai/src/config.ts:236`](../packages/llm/llm-pi-ai/src/config.ts)
 
 ```ts config-catalog
 /** Plugin configuration: the provider routes this instance owns. */
@@ -2072,6 +2073,8 @@ export interface PiAiProviderProfile {
    * to answer instead.
    */
   defaultInput?: PiAiModality[]
+  /** Explicit OpenAI-compatible image route owned by this provider profile. */
+  image?: PiAiImageProfile
   /** Provider request headers, validated against Fetch when the profile resolves; Harness attribution wins reserved names. */
   headers?: Record<string, string>
   /** Provider-neutral pi-ai reasoning level. */
@@ -2248,6 +2251,18 @@ export interface PiAiCompatProfile {
 
 /** One request modality a pi-ai model may accept. */
 export type PiAiModality = Model<Api>['input'][number]
+
+/** Provider-owned image generation declaration; omission means no image route. */
+export interface PiAiImageProfile {
+  /** Model id sent to `POST /images/generations`. */
+  model: string
+  /** Optional model used for review when no current vision model is selected. */
+  reviewModel?: string
+  /** Image sizes accepted by the provider route. */
+  sizes?: string[]
+  /** Image qualities accepted by the provider route. */
+  qualities?: string[]
+}
 
 /**
  * Selectable reasoning efforts for one model: each key is a level the model

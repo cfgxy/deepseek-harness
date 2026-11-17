@@ -148,6 +148,8 @@ export interface PiAiProviderProfile {
    * to answer instead.
    */
   defaultInput?: PiAiModality[]
+  /** Explicit OpenAI-compatible image route owned by this provider profile. */
+  image?: PiAiImageProfile
   /** Provider request headers, validated against Fetch when the profile resolves; Harness attribution wins reserved names. */
   headers?: Record<string, string>
   /** Provider-neutral pi-ai reasoning level. */
@@ -180,6 +182,18 @@ export interface PiAiProviderProfile {
   requestImageMaxBytes?: number
   /** Provider-owned model-request retry policy; omission uses normal mode with five retries. */
   retryPolicy?: RetryPolicyConfig
+}
+
+/** Provider-owned image generation declaration; omission means no image route. */
+export interface PiAiImageProfile {
+  /** Model id sent to `POST /images/generations`. */
+  model: string
+  /** Optional model used for review when no current vision model is selected. */
+  reviewModel?: string
+  /** Image sizes accepted by the provider route. */
+  sizes?: string[]
+  /** Image qualities accepted by the provider route. */
+  qualities?: string[]
 }
 
 /** Validated profile with its route stamped and every adapter-owned default resolved. */
@@ -334,6 +348,15 @@ const profile = z.object({
   defaultContextWindow: z.number().step(1).min(1).default(DEFAULT_CONTEXT_WINDOW),
   defaultMaxTokens: z.number().step(1).min(1).default(DEFAULT_MAX_TOKENS),
   defaultInput: z.array(z.union(MODALITIES)).default([...DEFAULT_INPUT]),
+  image: z.union([
+    z.object({
+      model: z.string().required(),
+      reviewModel: z.string().required(false),
+      sizes: z.array(z.string()).required(false),
+      qualities: z.array(z.string()).required(false),
+    }),
+    z.const(undefined),
+  ]),
   headers: z.dict(z.string()),
   reasoning: z.union(THINKING_LEVELS),
   thinkingBudgets,
@@ -424,6 +447,19 @@ export function resolveProfiles(
     }
     if (source.displayName !== undefined && source.displayName.length === 0) {
       throw new Error(`llm-pi-ai: provider "${provider}" has an empty displayName`)
+    }
+    if (source.image !== undefined) {
+      if (source.image.model.trim() === '') {
+        throw new Error(`llm-pi-ai: provider "${provider}" image.model must be non-empty`)
+      }
+      if (source.image.reviewModel !== undefined && source.image.reviewModel.trim() === '') {
+        throw new Error(`llm-pi-ai: provider "${provider}" image.reviewModel must be non-empty`)
+      }
+      for (const [field, values] of [['sizes', source.image.sizes], ['qualities', source.image.qualities]] as const) {
+        if (values?.some(value => value.trim() === '')) {
+          throw new Error(`llm-pi-ai: provider "${provider}" image.${field} must not contain empty values`)
+        }
+      }
     }
     assertValidHeaders(provider, source.headers)
     const streamIdleTimeoutMs = source.streamIdleTimeoutMs ?? DEFAULT_STREAM_IDLE_TIMEOUT_MS

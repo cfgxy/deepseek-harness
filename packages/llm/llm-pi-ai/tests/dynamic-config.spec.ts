@@ -10,6 +10,7 @@ import { LocalCredentialProvider } from '@deepseek-ai/dsh-credentials-local'
 import { liveConfig } from '../../../settings/settings/tests/live-config.ts'
 import * as LlmPiAi from '@deepseek-ai/dsh-llm-pi-ai'
 import AuthorizationService from '@deepseek-ai/dsh-authorization'
+import { ImageCapabilityRegistryService } from '../../../bundle/image-iterate-plugin/src/capability.ts'
 import { assemble } from './assemble.ts'
 import { closeMockServers, mockServer, textEvents } from './mock-server.ts'
 
@@ -41,13 +42,14 @@ async function home(): Promise<string> {
 async function boot(
   dir: string,
   config: LlmPiAi.Options,
-  options: { authorization?: boolean } = {},
+  options: { authorization?: boolean; imageRegistry?: ImageCapabilityRegistryService } = {},
 ): Promise<Context> {
   const ctx = new Context()
   cleanups.push(async () => {
     await ctx.fiber.dispose()
   })
   await ctx.plugin(LlmRuntime)
+  if (options.imageRegistry !== undefined) ctx.provide('imageCapabilities', options.imageRegistry)
   await ctx.plugin(LocalCredentialProvider, { path: join(dir, '.credentials.yaml'), watch: false })
   if (options.authorization === true) await ctx.plugin(AuthorizationService)
   initialConfigs.set(ctx, config)
@@ -76,6 +78,43 @@ describe('login flows in a real composition', () => {
 })
 
 describe('request-level dynamic profiles', () => {
+  it('replaces provider-owned image capabilities when live profiles update', async () => {
+    const dir = await home()
+    await writeFile(join(dir, '.credentials.yaml'), 'version: 1\nrefs:\n  PI_IMAGE_KEY: fixture-key\n', { mode: 0o600 })
+    const registry = new ImageCapabilityRegistryService()
+    const ctx = await boot(dir, {
+      providers: {
+        gateway: {
+          api: 'openai-completions',
+          apiKeyEnv: 'PI_IMAGE_KEY',
+          baseURL: 'https://first.test/v1',
+          models: [{ id: 'vision-first', input: ['text', 'image'] }],
+          image: { model: 'image-first' },
+        },
+      },
+    }, { imageRegistry: registry })
+
+    expect(registry.list('gateway').map(capability => capability.model)).toEqual(['image-first'])
+    expect(registry.listReviews('gateway').map(capability => capability.model)).toEqual(['vision-first'])
+
+    await configurations.get(ctx)!.update({
+      providers: {
+        gateway: {
+          baseURL: 'https://second.test/v1',
+          models: [{ id: 'vision-second', input: ['text', 'image'] }],
+          image: { model: 'image-second' },
+        },
+      },
+    })
+
+    expect(registry.list('gateway').map(capability => capability.model)).toEqual(['image-second'])
+    expect(registry.listReviews('gateway').map(capability => capability.model)).toEqual(['vision-second'])
+
+    await configurations.get(ctx)!.replace({ providers: {} })
+    expect(registry.list('gateway')).toEqual([])
+    expect(registry.listReviews('gateway')).toEqual([])
+  })
+
   it('keeps stored catalog failures editable while isolating requests and validating changed providers', async () => {
     vi.stubEnv('PI_DYNAMIC_KEY', '')
     const dir = await home()

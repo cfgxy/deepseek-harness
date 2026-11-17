@@ -45,6 +45,11 @@ kind: "package-reference"
         apiKeyEnv: OPENAI_API_KEY
         baseURL: https://proxy.example.com:8443
         reasoning: high
+        image:
+          model: image-model
+          reviewModel: vision-model
+          sizes: [1024x1024]
+          qualities: [medium]
         requestImagePixelBudget: 4194304 # total pixels; 2048 by 2048 default
         requestImageMaxBytes: 1048576    # raw bytes before base64 expansion
         maxRequestImageBytes: 20971520   # accumulated base64 payload
@@ -83,6 +88,7 @@ kind: "package-reference"
 | `compat` | 目录检测 | 无法识别端点的协议兼容开关 |
 | `defaultContextWindow` | `1,000,000` | 未描述模型的容量回退 |
 | `defaultMaxTokens` | `128,000` | 未描述模型的输出上限回退 |
+| `image` | 无 | 显式声明 provider-owned OpenAI-compatible 图像生成模型；可选声明审核模型、尺寸和质量 |
 | `requestImagePixelBudget` | `4,194,304` | 每张确定性请求图片的总像素预算 |
 | `requestImageMaxBytes` | `1 MiB` | 每张请求图片在 base64 扩展前的编码字节目标 |
 | `maxRequestImageBytes` | `20 MiB` | base64 图片载荷总上限，保留图片超过时请求以 `IMAGE_OFFLOAD_REQUIRED` 失败 |
@@ -105,6 +111,12 @@ profile 的 `models` 列表会替换而非扩展路由的已安装目录；每�
 确切模型元数据将 `reasoning.efforts` 按可选强度从低到高排列。配置函数可从该列表中选择，再由 `prepareCall()` 校验具体强度。适配器只接收解析后的控制项。选择 `off` 不保证禁用推理：以省略推理字段表达该值的协议会沿用网关默认行为。所选等级下产生的推理 token 都计入该请求的输出上限。
 
 对于自托管 Chat Completions 端点，`thinkingTokenBudgetField` 选择推理预算参数，`vllmPriority` 在服务端启用优先级调度时设置整数调度优先级。模板参数接受 `$var: thinking.budget`。`openai-responses` 网关可设置 `supportsMaxOutputTokens: false` 来省略 `max_output_tokens`；Azure 与 Codex 传输会忽略这个共享兼容字段。这些控制均需显式启用；目录拥有的 Anthropic effort 和回退能力不是可配置开关。
+
+### Provider-owned 图像能力
+
+只有显式配置 `image.model` 的 provider 才会向 `ImageCapabilityRegistry` 注册图像生成能力。该能力使用当前 profile 的 `baseURL`、`apiKeyEnv` 凭据解析、`headers` 和 `llm-pi-ai/request-headers` waterfall，分别调用 OpenAI-compatible 的 `/images/generations` 与 `/chat/completions`。`reviewModel` 用于没有当前视觉模型时的审核；profile 模型目录中声明 `input: [text, image]` 的当前模型会同时注册为审核路由，因此 image plugin 不需要重复配置 endpoint、model 或 credential。profile 更新会卸载旧能力并重建新能力，provider fiber 销毁时清理全部能力；没有 `image` 声明不会注册任何图像能力。
+
+生成响应必须包含有效 `b64_json`，审核响应必须是 `{"accepted": boolean, "feedback": string}`。网络失败、取消、无效响应和缺失凭据会以稳定错误码失败，不会自动重试未知请求结果。
 
 ### 运行时更改配置
 
