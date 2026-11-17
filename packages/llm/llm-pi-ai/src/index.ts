@@ -71,6 +71,7 @@ import { assertServiceable, Config, resolveProfiles } from './config.ts'
 import type { ResolvedPiAiProviderProfile } from './config.ts'
 import { discoverModels } from './discovery.ts'
 import type { StoredModelDiscoveryProfile } from './discovery.ts'
+import { syncImageCapabilities } from './image-capability.ts'
 import { registerPiAiFlows } from './login.ts'
 import { providerDefaultsOf } from './provider-data.ts'
 import type { PiAiRequestHeaderContext } from './types.ts'
@@ -89,9 +90,11 @@ export type {
   PiAiReasoningEfforts,
   PiAiThinkingFormat,
   ResolvedPiAiProviderProfile,
+  PiAiImageProfile,
 } from './config.ts'
 export { recordKeyFor } from './auth.ts'
 export { supportedProtocols } from './provider.ts'
+export type { ImageCapabilityContext } from './image-capability.ts'
 
 export const name = 'llm-pi-ai'
 export const inject = ['llm']
@@ -309,6 +312,22 @@ export function apply(ctx: Context, config: Config): void {
   // settings section supplies profiles, and routes drop when it empties.
   let registration: AdapterRegistrationHandle | undefined
   let registeredFacts: unknown
+  let imageDisposer: (() => void) | undefined
+  let imageContext: import('./image-capability.ts').ImageCapabilityContext | undefined
+  const syncImages = (): void => {
+    if (imageContext === undefined) return
+    imageDisposer?.()
+    imageDisposer = syncImageCapabilities(imageContext, profiles, resolveApiKey)
+  }
+  ctx.inject(['imageCapabilities'], (child) => {
+    imageContext = child as import('./image-capability.ts').ImageCapabilityContext
+    syncImages()
+    child.effect(() => () => {
+      imageDisposer?.()
+      imageDisposer = undefined
+      imageContext = undefined
+    })
+  })
   const ensureRegistrationFacts = (): void => {
     const facts = registrationFacts(profiles())
     if (deepEqualJson(facts, registeredFacts)) return
@@ -335,7 +354,7 @@ export function apply(ctx: Context, config: Config): void {
   ensureRegistrationFacts()
 
   ctx.on('loader/volatile-update', () => {
-    try { ensureRegistrationFacts(); ensureDirectory() }
+    try { ensureRegistrationFacts(); ensureDirectory(); syncImages() }
     catch (error) {
       ctx.logger.error('llm-pi-ai: configuration conflicts with an existing provider route')
       ctx.logger.error(error)

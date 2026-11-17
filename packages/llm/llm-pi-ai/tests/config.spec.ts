@@ -83,6 +83,25 @@ describe('modality schema boundary', () => {
     expect(absent.providers['acme-gateway']?.models?.[0]?.input).toEqual([])
     expect(absent.providers['acme-gateway']?.defaultInput).toEqual(['text'])
   })
+
+  it('requires a non-empty provider-owned image model and route values', () => {
+    expect(() => resolveProfiles({
+      'acme-gateway': {
+        api: 'openai-completions',
+        baseURL: 'https://acme.test',
+        models: [{ id: 'm' }],
+        image: { model: ' ', reviewModel: ' ', sizes: ['1024x1024', ''], qualities: ['medium'] },
+      },
+    })).toThrow(/image\.model must be non-empty/)
+    expect(() => resolveProfiles({
+      'acme-gateway': {
+        api: 'openai-completions',
+        baseURL: 'https://acme.test',
+        models: [{ id: 'm' }],
+        image: { model: 'image-model', sizes: [''], qualities: ['medium'] },
+      },
+    })).toThrow(/image\.sizes must not contain empty values/)
+  })
 })
 
 describe('request image policy bounds', () => {
