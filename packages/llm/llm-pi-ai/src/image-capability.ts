@@ -109,10 +109,12 @@ async function postJson(
     signal?.addEventListener('abort', abort, { once: true })
   }
   const timeout = setTimeout(() => { controller.abort() }, profile.timeoutMs ?? 120_000)
-  const headers = requestHeaders(ctx, profile, provider, model, purpose)
-  if (token !== undefined) headers.set('authorization', `Bearer ${token}`)
-  headers.set('content-type', 'application/json')
+  let prepared = false
   try {
+    const headers = requestHeaders(ctx, profile, provider, model, purpose)
+    prepared = true
+    if (token !== undefined) headers.set('authorization', `Bearer ${token}`)
+    headers.set('content-type', 'application/json')
     const response = await fetch(endpoint(profile.baseURL ?? '', path), {
       method: 'POST',
       headers,
@@ -128,6 +130,7 @@ async function postJson(
       throw new LlmError('llm-pi-ai image capability received a non-JSON response', 'INVALID_UPSTREAM_RESPONSE', { cause: error })
     }
   } catch (error) {
+    if (!prepared) throw error
     if (error instanceof LlmError) throw error
     if (signal?.aborted) throw new LlmError('llm-pi-ai image capability request was cancelled', 'CANCELLED', { cause: error })
     throw new LlmError('llm-pi-ai image capability request outcome is unknown; automatic retry is disabled', 'UPSTREAM_OUTCOME_UNKNOWN', { cause: error })
@@ -224,34 +227,80 @@ function reviewCapability(
   }
 }
 
+type CapabilityRegistration = () => () => void
+export type ImageCapabilitySynchronizer = (() => void) & { sync(): void }
+
+function disposeCapabilities(disposers: readonly (() => void)[]): void {
+  for (const dispose of [...disposers].reverse()) dispose()
+}
+
+function installCapabilities(registrations: readonly CapabilityRegistration[]): (() => void)[] {
+  const disposers: (() => void)[] = []
+  try {
+    for (const register of registrations) disposers.push(register())
+    return disposers
+  } catch (error) {
+    disposeCapabilities(disposers)
+    throw error
+  }
+}
+
+function imageCapabilityRegistrations(
+  ctx: ImageCapabilityContext,
+  profiles: ReadonlyMap<string, ResolvedPiAiProviderProfile>,
+  resolveApiKey: (provider: string, profile: ResolvedPiAiProviderProfile) => Promise<string | undefined>,
+): CapabilityRegistration[] {
+  const registrations: CapabilityRegistration[] = []
+  for (const [provider, profile] of profiles) {
+    const image = profile.image
+    const baseURL = imageBaseURL(profile)
+    if (image === undefined || baseURL === undefined) continue
+    const generation = generationCapability(ctx, provider, profile, image, baseURL, resolveApiKey)
+    registrations.push(() => ctx.imageCapabilities.register(generation))
+    const reviewModels = new Set<string>()
+    if (image.reviewModel !== undefined) reviewModels.add(image.reviewModel)
+    for (const model of imageModels(profile)) {
+      if (model.input.includes('image')) reviewModels.add(model.id)
+    }
+    for (const model of reviewModels) {
+      const review = reviewCapability(ctx, provider, profile, model, baseURL, resolveApiKey)
+      registrations.push(() => ctx.imageCapabilities.registerReview(review))
+    }
+  }
+  return registrations
+}
+
 /** Synchronize provider-owned image routes with the current resolved profile snapshot. */
 export function syncImageCapabilities(
   ctx: ImageCapabilityContext,
   profiles: () => ReadonlyMap<string, ResolvedPiAiProviderProfile>,
   resolveApiKey: (provider: string, profile: ResolvedPiAiProviderProfile) => Promise<string | undefined>,
-): () => void {
+): ImageCapabilitySynchronizer {
+  let registrations: CapabilityRegistration[] = []
   let disposers: (() => void)[] = []
-  const sync = (): void => {
-    for (const dispose of disposers) dispose()
+  const synchronize = (): void => {
+    const nextRegistrations = imageCapabilityRegistrations(ctx, profiles(), resolveApiKey)
+    const previousRegistrations = registrations
+    const previousDisposers = disposers
+    disposeCapabilities(previousDisposers)
+    registrations = []
     disposers = []
-    for (const [provider, profile] of profiles()) {
-      const image = profile.image
-      const baseURL = imageBaseURL(profile)
-      if (image === undefined || baseURL === undefined) continue
-      disposers.push(ctx.imageCapabilities.register(generationCapability(ctx, provider, profile, image, baseURL, resolveApiKey)))
-      const reviewModels = new Set<string>()
-      if (image.reviewModel !== undefined) reviewModels.add(image.reviewModel)
-      for (const model of imageModels(profile)) {
-        if (model.input.includes('image')) reviewModels.add(model.id)
-      }
-      for (const model of reviewModels) {
-        disposers.push(ctx.imageCapabilities.registerReview(reviewCapability(ctx, provider, profile, model, baseURL, resolveApiKey)))
-      }
+    try {
+      disposers = installCapabilities(nextRegistrations)
+      registrations = nextRegistrations
+    } catch (error) {
+      // A bad volatile update must not withdraw the last working provider routes.
+      disposers = installCapabilities(previousRegistrations)
+      registrations = previousRegistrations
+      throw error
     }
   }
-  sync()
-  return () => {
-    for (const dispose of disposers) dispose()
+  const dispose = (() => {
+    disposeCapabilities(disposers)
     disposers = []
-  }
+    registrations = []
+  }) as ImageCapabilitySynchronizer
+  dispose.sync = synchronize
+  synchronize()
+  return dispose
 }

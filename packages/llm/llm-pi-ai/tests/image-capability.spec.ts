@@ -36,8 +36,10 @@ type Review = {
 class Registry {
   readonly generations: Generation[] = []
   readonly reviews: Review[] = []
+  failGenerationModel?: string
 
   register(capability: Generation): () => void {
+    if (capability.model === this.failGenerationModel) throw new Error('fixture registration conflict')
     this.generations.push(capability)
     return () => {
       const index = this.generations.indexOf(capability)
@@ -231,6 +233,54 @@ it('replaces old provider routes when the resolved profile is synchronized again
   secondDispose()
   expect(registry.generations).toEqual([])
   expect(registry.reviews).toEqual([])
+})
+
+it('cleans request resources when a request-header listener rejects the dispatch', async () => {
+  const ctx = new Context()
+  const registry = new Registry()
+  ctx.on('llm-pi-ai/request-headers', () => { throw new Error('fixture header failure') })
+  const dispose = syncImageCapabilities(
+    Object.assign(ctx, { imageCapabilities: registry }),
+    () => profileWithImage(),
+    async () => 'fixture-key',
+  )
+  const controller = new AbortController()
+  const removeListener = vi.spyOn(controller.signal, 'removeEventListener')
+  const clearTimer = vi.spyOn(globalThis, 'clearTimeout')
+
+  await expect(registry.generations[0]!.generate({
+    prompt: 'prompt', size: '1024x1024', quality: 'medium', outputFormat: 'png', signal: controller.signal,
+  })).rejects.toThrow('fixture header failure')
+  expect(removeListener).toHaveBeenCalledWith('abort', expect.any(Function))
+  expect(clearTimer).toHaveBeenCalled()
+  dispose()
+})
+
+it('restores the previous provider routes when a volatile replacement cannot register', () => {
+  const registry = new Registry()
+  let current = profileWithImage()
+  const sync = syncImageCapabilities(
+    Object.assign(new Context(), { imageCapabilities: registry }),
+    () => current,
+    async () => 'fixture-key',
+  )
+  const originalGeneration = registry.generations[0]
+  const originalReviews = [...registry.reviews]
+  current = resolveProfiles({
+    gateway: {
+      api: 'openai-completions',
+      baseURL: 'https://gateway.test/v1',
+      apiKeyEnv: 'IMAGE_TEST_KEY',
+      models: [{ id: 'vision-next', input: ['text', 'image'] }],
+      image: { model: 'replacement-image-model' },
+    },
+  })
+  registry.failGenerationModel = 'replacement-image-model'
+
+  expect(() => { sync.sync() }).toThrow('fixture registration conflict')
+  expect(registry.generations).toEqual([originalGeneration])
+  expect(registry.reviews).toEqual(originalReviews)
+  sync()
 })
 
 it('reports malformed review JSON, non-JSON responses, unknown network outcomes, and cancellation', async () => {

@@ -72,6 +72,7 @@ import type { ResolvedPiAiProviderProfile } from './config.ts'
 import { discoverModels } from './discovery.ts'
 import type { StoredModelDiscoveryProfile } from './discovery.ts'
 import { syncImageCapabilities } from './image-capability.ts'
+import type { ImageCapabilityContext, ImageCapabilitySynchronizer } from './image-capability.ts'
 import { registerPiAiFlows } from './login.ts'
 import { providerDefaultsOf } from './provider-data.ts'
 import type { PiAiRequestHeaderContext } from './types.ts'
@@ -312,15 +313,18 @@ export function apply(ctx: Context, config: Config): void {
   // settings section supplies profiles, and routes drop when it empties.
   let registration: AdapterRegistrationHandle | undefined
   let registeredFacts: unknown
-  let imageDisposer: (() => void) | undefined
-  let imageContext: import('./image-capability.ts').ImageCapabilityContext | undefined
+  let imageDisposer: ImageCapabilitySynchronizer | undefined
+  let imageContext: ImageCapabilityContext | undefined
   const syncImages = (): void => {
     if (imageContext === undefined) return
-    imageDisposer?.()
-    imageDisposer = syncImageCapabilities(imageContext, profiles, resolveApiKey)
+    if (imageDisposer === undefined) {
+      imageDisposer = syncImageCapabilities(imageContext, profiles, resolveApiKey)
+    } else {
+      imageDisposer.sync()
+    }
   }
   ctx.inject(['imageCapabilities'], (child) => {
-    imageContext = child as import('./image-capability.ts').ImageCapabilityContext
+    imageContext = child as ImageCapabilityContext
     syncImages()
     child.effect(() => () => {
       imageDisposer?.()
