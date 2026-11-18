@@ -149,7 +149,7 @@ export interface PiAiProviderProfile {
    */
   defaultInput?: PiAiModality[]
   /** Explicit OpenAI-compatible image route owned by this provider profile. */
-  image?: PiAiImageProfile
+  image?: PiAiImageProfile | undefined
   /** Provider request headers, validated against Fetch when the profile resolves; Harness attribution wins reserved names. */
   headers?: Record<string, string>
   /** Provider-neutral pi-ai reasoning level. */
