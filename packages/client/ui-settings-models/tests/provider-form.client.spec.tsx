@@ -990,6 +990,43 @@ describe('hand-declared providers', () => {
     expect(initialize).not.toHaveBeenCalled()
   })
 
+  it('passes the chosen manual route to discovery and persists an explicit Terra image correction', async () => {
+    const discover = vi.fn(() => Promise.resolve(ok([{ id: 'gpt-5.6-terra' }])))
+    const { mutate, onClose } = mountCard({}, { discover })
+    fireEvent.change(screen.getByLabelText(en.customRoute), { target: { value: 'panuoyun' } })
+    fireEvent.change(screen.getByLabelText(en.baseUrl), { target: { value: 'https://gateway.example/v1' } })
+    fireEvent.change(screen.getByLabelText(en.keyInput), { target: { value: 'test-key' } })
+    fireEvent.click(screen.getByText(en.fetchModels))
+    await screen.findByRole('dialog', { name: en.fetchTitle })
+    expect(lastProbe(discover)).toMatchObject({ provider: 'panuoyun', baseURL: 'https://gateway.example/v1' })
+    fireEvent.click(screen.getByText(en.fetchAdopt))
+    expandModel(1)
+    fireEvent.click(screen.getByRole<HTMLInputElement>('checkbox', { name: en.modelInputImage }))
+    fireEvent.click(screen.getByText(en.create))
+    await waitFor(() => { expect(onClose).toHaveBeenCalledWith(true) })
+    expect(firstMutate(mutate).ops[0]?.value).toMatchObject({
+      models: [{ id: 'gpt-5.6-terra', input: ['text', 'image'] }],
+    })
+
+    cleanup()
+    const other = vi.fn(() => Promise.resolve(ok([{ id: 'gpt-5.6-terra' }])))
+    mountCard({}, { discover: other })
+    fireEvent.change(screen.getByLabelText(en.customRoute), { target: { value: 'another-gateway' } })
+    fireEvent.change(screen.getByLabelText(en.baseUrl), { target: { value: 'https://gateway.example/v1' } })
+    fireEvent.click(screen.getByText(en.fetchModels))
+    await screen.findByRole('dialog', { name: en.fetchTitle })
+    expect(lastProbe(other)).toMatchObject({ provider: 'another-gateway' })
+
+    cleanup()
+    await mountSection({
+      providers: { panuoyun: { api: 'openai-completions', baseURL: 'https://gateway.example/v1', models: [{ id: 'gpt-5.6-terra', input: ['text', 'image'] }] } },
+      declaredRoutes: ['panuoyun'],
+    })
+    openEditor('panuoyun')
+    expandModel(1)
+    expect(screen.getByRole<HTMLInputElement>('checkbox', { name: en.modelInputImage }).checked).toBe(true)
+  })
+
   it('writes the whole profile and the key under the derived reference', async () => {
     const { mutate, set, onClose } = mountCard()
 

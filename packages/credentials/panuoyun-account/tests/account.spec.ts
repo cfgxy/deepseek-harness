@@ -106,7 +106,7 @@ describe('PanuoyunAccount', () => {
     expect(test.settings.value.providers.panuoyun).toEqual({
       displayName: '派诺云', apiKeyEnv: 'PANUOYUN_API_KEY', api: 'openai-completions',
       baseURL: 'https://api.apinoria.com/v1',
-      models: [{ id: 'gpt-5.6-terra', input: ['text', 'image'], metadataSource: 'panuoyun-catalog' }],
+      models: [{ id: 'gpt-5.6-terra' }],
     })
     expect(JSON.stringify(test.settings.value)).not.toContain('selected-secret')
     await test.dispose()

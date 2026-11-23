@@ -295,6 +295,7 @@ export function CustomProviderCard(props: CustomProviderCardProps): ReactNode {
         reasoningLevels={reasoningLevels}
         probe={{
           settingsNs: NS,
+          ...route.length === 0 ? {} : { provider: route },
           baseURL: normalizedBaseURL,
           api: protocol,
           ...keyValue.length === 0 ? {} : { apiKey: keyValue },
