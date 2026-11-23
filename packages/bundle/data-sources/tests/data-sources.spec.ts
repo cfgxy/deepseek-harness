@@ -9,6 +9,13 @@ import type { ReadOperation, SourceConfig, SourceKind } from '../src/types.ts'
 const kinds: readonly SourceKind[] = ['local-directory', 's3', 'sftp', 'mysql', 'postgresql']
 
 function source(kind: SourceKind): SourceConfig {
+  const connection = kind === 's3'
+    ? { endpoint: 'http://127.0.0.1:9000', bucket: 'fixture' }
+    : kind === 'sftp'
+      ? { host: '127.0.0.1', knownHostsPath: '/tmp/known_hosts' }
+      : kind === 'mysql' || kind === 'postgresql'
+        ? { host: '127.0.0.1', database: 'fixture' }
+        : undefined
   return {
     id: kind.replace('-', '_'),
     revision: '1',
@@ -16,6 +23,7 @@ function source(kind: SourceKind): SourceConfig {
     label: `${kind} fixture`,
     enabled: true,
     ...(kind === 'local-directory' ? {} : { credentialRef: 'DATA_SOURCE_TEST' }),
+    ...(connection === undefined ? {} : { connection }),
     policy: { maxBytes: 1024, maxRows: 10, ...(kind === 's3' ? { allowedPrefix: 'reports/' } : kind === 'local-directory' || kind === 'sftp' ? { allowedPath: '/fixtures/' } : {}) },
   }
 }

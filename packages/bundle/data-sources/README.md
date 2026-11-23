@@ -5,38 +5,34 @@ kind: "bundle"
 
 # Data sources
 
-`@ruyi/dsh-data-sources` is an opt-in bundle that exposes a source registry, policy guard, and read tools. It has no Runtime dependency and never stores credential values, DSNs, or private keys in bundle configuration.
+`@ruyi/dsh-data-sources` is an opt-in, Runtime-independent bundle. It registers four MCP-shaped tools (`data_sources_list`, `data_sources_inspect`, `data_sources_probe`, and `data_sources_read`) and constructs its five read-only connectors on `apply()`.
 
-## Use this bundle
+## Source configuration
 
-Install the bundle, then configure source metadata and an integration-owned connector for each enabled source. Supported source kinds are `local-directory`, `s3`, `sftp`, `mysql`, and `postgresql`. External sources use a DSH credential reference and resolve it separately for every operation.
+Each source has non-secret coordinates in `connection`, a credential reference in `credentialRef`, and an output/path policy. Credential values are resolved for each probe/read and are never persisted in configuration or returned by tools.
 
-The public API is `@ruyi/dsh-data-sources/api` version `v1`. It supplies `ConnectorSupervisor`, `ReadConnector`, and the source/request/result types. Connectors receive only admitted read requests. They must not offer write operations.
+| Kind | Required non-secret connection fields | Credential JSON |
+| --- | --- | --- |
+| `local-directory` | none (`policy.allowedPath`) | none |
+| `s3` / OSS-compatible | `endpoint`, `bucket`, optional `region` (`policy.allowedPrefix`) | `{"accessKeyId":"…","secretAccessKey":"…","sessionToken":"…"}` |
+| `sftp` | `host`, optional `port`, `knownHostsPath` (`policy.allowedPath`) | `{"username":"…","privateKey":"…"}` |
+| `mysql` | `host`, optional `port`, `database` | `{"username":"…","password":"…"}` |
+| `postgresql` | `host`, optional `port`, `database` | `{"username":"…","password":"…"}` |
+
+SFTP uses OpenSSH with `StrictHostKeyChecking=yes` and an ephemeral key file removed after each operation. S3 reads use SigV4 against path-style S3-compatible endpoints. MySQL speaks the classic protocol with `mysql_native_password`; PostgreSQL speaks protocol v3 (trust, clear-text password, and MD5 password authentication).
 
 ## Safety rules
 
-- Local and SFTP reads require a configured path allow-list.
-- S3 reads require a configured prefix allow-list.
-- MySQL and PostgreSQL admit one `SELECT`, `WITH`, `EXPLAIN`, or `SHOW` statement only; writes, DDL, `COPY`, and semicolon-separated statements are rejected before connector dispatch.
-- Result byte and row limits may not exceed source policy.
-- Tool output contains source identity and non-secret evidence only.
+- Local and SFTP reads require a configured absolute path allow-list and resolve symlinks before reading.
+- S3 reads require a configured normalized prefix allow-list.
+- MySQL and PostgreSQL allow one `SELECT`, `WITH`, `EXPLAIN`, or `SHOW` statement only. Writes, DDL, `COPY`, semicolons, and MySQL `INTO OUTFILE` / `INTO DUMPFILE` are rejected before transport dispatch.
+- Every connector applies concrete `maxBytes` and `maxRows`; a source policy is the upper bound.
+- The bundle has no object write, file upload, or database mutation operation.
 
-## Model Experience
+## Model experience
 
-### Read tools
+The model sees source identity, policies, and bounded data only. It does not see credential values or a DSN. `data_sources_probe` verifies an enabled source without returning contents, while `data_sources_read` routes one admitted read to its matching connector.
 
-#### What the model sees
+## Current compatibility boundary
 
-The bundle contributes `data_sources_list`, `data_sources_inspect`, and `data_sources_read`. The configured source IDs, policy-limited requests, and read results are visible; credential values are not.
-
-#### Token effect
-
-The three tool schemas are included while the bundle is enabled.
-
-#### KV Cache effect
-
-The schemas remain stable until the bundle is enabled or disabled.
-
-## Known Limitations and Deferred Work
-
-- **Deployment connector integration is required** — this minimal bundle supplies registry, policy, credentials, and tool adaptation; production S3/OSS, SFTP, and database MCP process integrations still require dedicated fixture-backed adapters and real service verification.
+The connector implementations are host-side. A separate Client companion is needed to render an editable Plugins form; exposing private key or password fields through that form is intentionally out of scope for this package and must use the DSH credential picker.

@@ -1,3 +1,4 @@
+/* oxlint-disable @stylistic/max-len -- concise config validation keeps source kind invariants adjacent. */
 import { isCredentialRefName } from '@deepseek-ai/dsh-credentials'
 
 export const SOURCE_KINDS = ['local-directory', 's3', 'sftp', 'mysql', 'postgresql'] as const
@@ -10,7 +11,16 @@ export interface SourcePolicy {
   allowedPath?: string
   allowedPrefix?: string
 }
-
+/** Non-secret connection coordinates. Authentication material always comes from credentialRef. */
+export interface SourceConnection {
+  endpoint?: string
+  bucket?: string
+  region?: string
+  host?: string
+  port?: number
+  database?: string
+  knownHostsPath?: string
+}
 export interface SourceConfig {
   id: string
   revision: string
@@ -19,8 +29,8 @@ export interface SourceConfig {
   enabled: boolean
   credentialRef?: string
   policy: SourcePolicy
+  connection?: SourceConnection
 }
-
 export interface ReadRequest {
   apiVersion: 'v1'
   sourceId: string
@@ -29,7 +39,6 @@ export interface ReadRequest {
   maxBytes?: number
   maxRows?: number
 }
-
 export interface ReadResult {
   source: { id: string; revision: string }
   data: unknown
@@ -38,31 +47,20 @@ export interface ReadResult {
 }
 
 const SOURCE_ID = /^[A-Za-z0-9_-]{1,64}$/
+const endpoint = (source: SourceConfig) => source.connection?.endpoint
+const host = (source: SourceConfig) => source.connection?.host
 
 export function assertSourceConfig(source: SourceConfig): void {
   if (!SOURCE_ID.test(source.id)) throw new Error(`data-sources: invalid source id ${JSON.stringify(source.id)}`)
   if (source.revision.trim() === '') throw new Error(`data-sources: source ${source.id} needs a revision`)
   if (source.label.trim() === '') throw new Error(`data-sources: source ${source.id} needs a label`)
   if (!SOURCE_KINDS.includes(source.kind)) throw new Error(`data-sources: source ${source.id} has an unsupported kind`)
-  if (source.credentialRef !== undefined && !isCredentialRefName(source.credentialRef)) {
-    throw new Error(`data-sources: source ${source.id} has an invalid credential reference`)
-  }
-  if (!Number.isInteger(source.policy.maxBytes) || source.policy.maxBytes < 1) {
-    throw new Error(`data-sources: source ${source.id} maxBytes must be a positive integer`)
-  }
-  if (!Number.isInteger(source.policy.maxRows) || source.policy.maxRows < 1) {
-    throw new Error(`data-sources: source ${source.id} maxRows must be a positive integer`)
-  }
-  if ((source.kind === 'local-directory' || source.kind === 'sftp')
-    && (source.policy.allowedPath === undefined || !source.policy.allowedPath.startsWith('/') || source.policy.allowedPrefix !== undefined)) {
-    throw new Error(`data-sources: source ${source.id} requires an absolute allowedPath only`)
-  }
-  if (source.kind === 's3'
-    && (source.policy.allowedPrefix === undefined || source.policy.allowedPrefix.trim() === '' || source.policy.allowedPath !== undefined)) {
-    throw new Error(`data-sources: source ${source.id} requires an allowedPrefix only`)
-  }
-  if ((source.kind === 'mysql' || source.kind === 'postgresql')
-    && (source.policy.allowedPath !== undefined || source.policy.allowedPrefix !== undefined)) {
-    throw new Error(`data-sources: source ${source.id} does not accept a path or prefix policy`)
-  }
+  if (source.credentialRef !== undefined && !isCredentialRefName(source.credentialRef)) throw new Error(`data-sources: source ${source.id} has an invalid credential reference`)
+  if (!Number.isInteger(source.policy.maxBytes) || source.policy.maxBytes < 1) throw new Error(`data-sources: source ${source.id} maxBytes must be a positive integer`)
+  if (!Number.isInteger(source.policy.maxRows) || source.policy.maxRows < 1) throw new Error(`data-sources: source ${source.id} maxRows must be a positive integer`)
+  if (source.kind === 'local-directory' && (source.policy.allowedPath === undefined || !source.policy.allowedPath.startsWith('/') || source.policy.allowedPrefix !== undefined)) throw new Error(`data-sources: source ${source.id} requires an absolute allowedPath only`)
+  if (source.kind === 'sftp' && (source.policy.allowedPath === undefined || !source.policy.allowedPath.startsWith('/') || source.policy.allowedPrefix !== undefined || !host(source) || !source.connection?.knownHostsPath)) throw new Error(`data-sources: source ${source.id} requires host, knownHostsPath, and absolute allowedPath`)
+  if (source.kind === 's3' && (source.policy.allowedPrefix === undefined || source.policy.allowedPrefix.trim() === '' || source.policy.allowedPath !== undefined || !endpoint(source) || !source.connection?.bucket)) throw new Error(`data-sources: source ${source.id} requires endpoint, bucket, and allowedPrefix only`)
+  if ((source.kind === 'mysql' || source.kind === 'postgresql') && (source.policy.allowedPath !== undefined || source.policy.allowedPrefix !== undefined || !host(source) || !source.connection?.database)) throw new Error(`data-sources: source ${source.id} requires host and database without a path policy`)
+  if (source.connection?.port !== undefined && (!Number.isInteger(source.connection.port) || source.connection.port < 1 || source.connection.port > 65535)) throw new Error(`data-sources: source ${source.id} has an invalid port`)
 }

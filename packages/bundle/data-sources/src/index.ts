@@ -4,6 +4,10 @@ import { createMcpToolDefinition } from '@deepseek-ai/dsh-mcp-client'
 import type {} from '@deepseek-ai/dsh-credentials'
 import type {} from '@deepseek-ai/dsh-tools'
 import { LocalDirectoryConnector } from './local-directory.ts'
+import { S3Connector } from './s3.ts'
+import { SftpConnector } from './sftp.ts'
+import { MysqlConnector } from './mysql.ts'
+import { PostgreSqlConnector } from './postgresql.ts'
 import { ConnectorSupervisor } from './supervisor.ts'
 import type { ReadRequest, SourceConfig } from './types.ts'
 
@@ -28,7 +32,10 @@ export const Config: z<Config> = z.object({
     kind: z.union(['local-directory', 's3', 'sftp', 'mysql', 'postgresql'] as const).required(),
     label: z.string().required(),
     enabled: z.boolean().default(true),
-    credentialRef: z.string(),
+    connection: z.object({
+      endpoint: z.string(), bucket: z.string(), region: z.string(), host: z.string(), port: z.number().step(1).min(1).max(65535),
+      database: z.string(), knownHostsPath: z.string(),
+    }).default({}),
     policy: Policy.required(),
   })).default([]),
 })
@@ -74,8 +81,10 @@ function applyDataSourceTools(ctx: Context, supervisor: ConnectorSupervisor): vo
   })))
 }
 
-/** Install configuration-owned tools and the built-in local read connector. */
+/** Install configuration-owned tools and the five independently lifecycle-owned read connectors. */
 export function apply(ctx: Context, config: Config): void {
-  const supervisor = new ConnectorSupervisor(config.sources, [new LocalDirectoryConnector()], ctx.credentials)
+  const supervisor = new ConnectorSupervisor(config.sources, [
+    new LocalDirectoryConnector(), new S3Connector(), new SftpConnector(), new MysqlConnector(), new PostgreSqlConnector(),
+  ], ctx.credentials)
   applyDataSourceTools(ctx, supervisor)
 }
