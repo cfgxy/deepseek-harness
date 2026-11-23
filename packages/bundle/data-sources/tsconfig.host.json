@@ -1,0 +1,27 @@
+{
+  "extends": "../../../tsconfig.base.json",
+  "compilerOptions": {
+    "rootDir": "src",
+    "outDir": "lib/types",
+    "tsBuildInfoFile": "lib/tsconfig.host.tsbuildinfo"
+  },
+  "files": [
+    "src/index.ts",
+    "src/local-directory.ts",
+    "src/mysql.ts",
+    "src/policy.ts",
+    "src/postgresql.ts",
+    "src/s3.ts",
+    "src/sftp.ts",
+    "src/supervisor.ts",
+    "src/types.ts"
+  ],
+  "references": [
+    { "path": "../../../vendor/cordis" },
+    { "path": "../../../vendor/schemastery" },
+    { "path": "../../credentials/credentials" },
+    { "path": "../../mcp/mcp-client" },
+    { "path": "../../core/tools" },
+    { "path": "../../util/crypto" }
+  ]
+}

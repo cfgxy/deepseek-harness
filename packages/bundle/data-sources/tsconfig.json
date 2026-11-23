@@ -1,15 +1,8 @@
 {
-  "extends": "../../../tsconfig.base.json",
-  "compilerOptions": {
-    "rootDir": "src",
-    "outDir": "lib/types"
-  },
-  "include": ["src"],
+  "compilerOptions": { "composite": true },
+  "files": [],
   "references": [
-    { "path": "../../../vendor/cordis" },
-    { "path": "../../credentials/credentials" },
-    { "path": "../../mcp/mcp-client" },
-    { "path": "../../core/tools" },
-    { "path": "../../util/crypto" }
+    { "path": "./tsconfig.host.json" },
+    { "path": "./tsconfig.client.json" }
   ]
 }
