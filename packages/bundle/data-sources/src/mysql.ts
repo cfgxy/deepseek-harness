@@ -31,10 +31,20 @@ export class MysqlConnector implements ReadConnector {
       if (plugin && plugin !== 'mysql_native_password') throw new Error(`data-sources: MySQL authentication ${plugin} is unsupported; configure mysql_native_password for this read-only connector`)
       const capability = (caps & (0x00000001 | 0x00000004 | 0x00000008 | 0x00000200 | 0x00002000 | 0x00008000 | 0x00020000 | 0x00080000)) >>> 0; const header = Buffer.alloc(4 + 4 + 1 + 23); header.writeUInt32LE(capability, 0); header.writeUInt32LE(16 * 1024 * 1024, 4); header[8] = 45
       const response = Buffer.concat([header, nul(credential.username), Buffer.from([20]), token(credential.password, Buffer.concat([seed1, seed2])), nul(database!), nul('mysql_native_password')]); send(response, 1); const authOk = await next(); if (authOk[0] !== 0) throw new Error(`data-sources: MySQL authentication rejected: ${authOk.toString('utf8')}`)
+      const statementTimeout = request.source.connection?.statementTimeoutMs
+      if (statementTimeout !== undefined) {
+        send(Buffer.concat([Buffer.from([3]), Buffer.from(`SET SESSION max_execution_time = ${statementTimeout}`)]), 0)
+        const mysqlSetup = await next()
+        if (mysqlSetup[0] !== 0 && mysqlSetup[0] !== 0xff) throw new Error(`data-sources: MySQL statement timeout setup rejected: ${mysqlSetup.toString('utf8')}`)
+        // MariaDB accepts max_execution_time but does not enforce it; set its documented counterpart too.
+        send(Buffer.concat([Buffer.from([3]), Buffer.from(`SET SESSION max_statement_time = ${statementTimeout / 1000}`)]), 0)
+        const mariaSetup = await next()
+        if (mariaSetup[0] !== 0 && mariaSetup[0] !== 0xff) throw new Error(`data-sources: MySQL statement timeout setup rejected: ${mariaSetup.toString('utf8')}`)
+      }
       send(Buffer.concat([Buffer.from([3]), Buffer.from(sql)]), 0); const first = await next(); if (first[0] === 0xff) throw new Error(`data-sources: MySQL query rejected: ${first.toString('utf8')}`); [expectedColumns] = readLen(first, 0)
       for (let i = 0; i < expectedColumns; i++) { const field = await next(); let cursor = 0; for (let j = 0; j < 4; j++) { const [n, nextAt] = readLen(field, cursor); cursor = nextAt + n } const [nameLen, nameAt] = readLen(field, cursor); columns.push(field.toString('utf8', nameAt, nameAt + nameLen)) }
       await next(); readyForRows = true
-      while (readyForRows) { const row = await next(); if (row[0] === 0xfe && row.length < 9) break; let cursor = 0; const values: unknown[] = []; for (let i = 0; i < expectedColumns; i++) { if (row[cursor] === 0xfb) { values.push(null); cursor++; continue } const [n, nextAt] = readLen(row, cursor); values.push(row.toString('utf8', nextAt, nextAt + n)); cursor = nextAt + n } rows.push(values) }
+      while (readyForRows) { const row = await next(); if (row[0] === 0xfe && row.length < 9) break; if (row[0] === 0xff) throw new Error(`data-sources: MySQL query rejected: ${row.toString('utf8')}`); let cursor = 0; const values: unknown[] = []; for (let i = 0; i < expectedColumns; i++) { if (row[cursor] === 0xfb) { values.push(null); cursor++; continue } const [n, nextAt] = readLen(row, cursor); values.push(row.toString('utf8', nextAt, nextAt + n)); cursor = nextAt + n } rows.push(values) }
       return { columns, rows }
     } finally { socket.end() }
   }

@@ -52,13 +52,15 @@ export class SftpConnector implements ReadConnector {
           env: { PATH: process.env.PATH ?? '' },
         })
         const timeout = request.source.connection?.timeoutMs ?? 10_000
-        const timer = setTimeout(() => child.kill('SIGKILL'), timeout)
+        let timedOut = false
+        const timer = setTimeout(() => { timedOut = true; child.kill('SIGKILL') }, timeout)
         let stdout = ''; let stderr = ''
         child.stdout.setEncoding('utf8'); child.stdout.on('data', (data) => { stdout += data })
         child.stderr.setEncoding('utf8'); child.stderr.on('data', (data) => { stderr += data })
         child.once('error', reject); child.once('close', (code) => {
           clearTimeout(timer)
           if (code === 0) resolve({ stdout })
+          else if (timedOut) reject(new Error(`data-sources: SFTP operation timed out after ${timeout}ms`))
           else reject(new Error(stderr || `exit ${code}`))
         })
         child.stdin.end(`${command}\nquit\n`)

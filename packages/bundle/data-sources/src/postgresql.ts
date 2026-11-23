@@ -30,6 +30,8 @@ export class PostgreSqlConnector implements ReadConnector {
     socket.setTimeout(timeout, () => socket.destroy(new Error(`data-sources: PostgreSQL operation timed out after ${timeout}ms`)))
     let buffer = Buffer.alloc(0)
     let ready = false
+    let querySent = false
+    const statementTimeout = request.source.connection?.statementTimeoutMs ?? timeout
     let columns: string[] = []
     const rows: unknown[][] = []
     await new Promise<void>((resolve, reject) => { socket.once('connect', resolve); socket.once('error', reject) })
@@ -39,7 +41,15 @@ export class PostgreSqlConnector implements ReadConnector {
       socket.on('error', reject); socket.on('data', (data) => {
         buffer = Buffer.concat([buffer, data]); while (buffer.length >= 5) { const type = String.fromCharCode(buffer[0]!); const len = buffer.readUInt32BE(1); if (buffer.length < len + 1) return; const body = buffer.subarray(5, len + 1); buffer = buffer.subarray(len + 1)
           if (type === 'R') { const code = body.readUInt32BE(0); if (code === 0) continue; if (code === 3 && credential.password) socket.write(message('p', cstring(credential.password))); else if (code === 5 && credential.password) { const salt = body.subarray(4, 8); const inner = createHash('md5').update(`${credential.password}${credential.username}`).digest('hex'); const value = `md5${createHash('md5').update(Buffer.concat([Buffer.from(inner), salt])).digest('hex')}`; socket.write(message('p', cstring(value))) } else reject(new Error('data-sources: PostgreSQL authentication method is unsupported'))
-          } else if (type === 'Z') { if (!ready) { ready = true; socket.write(message('Q', cstring(sql))) } else resolve() } else if (type === 'E') reject(new Error(`data-sources: PostgreSQL query rejected: ${body.toString('utf8')}`))
+          } else if (type === 'Z') {
+            if (!ready) {
+              ready = true
+              socket.write(message('Q', cstring(`SET statement_timeout = ${statementTimeout}`)))
+            } else if (!querySent) {
+              querySent = true
+              socket.write(message('Q', cstring(sql)))
+            } else resolve()
+          } else if (type === 'E') reject(new Error(`data-sources: PostgreSQL query rejected: ${body.toString('utf8')}`))
           else if (type === 'T') { let at = 2; const count = body.readUInt16BE(0); columns = []; for (let i = 0; i < count; i++) { const end = body.indexOf(0, at); columns.push(body.toString('utf8', at, end)); at = end + 19 } } else if (type === 'D') { const count = body.readUInt16BE(0); let at = 2; const row: unknown[] = []; for (let i = 0; i < count; i++) { const length = body.readInt32BE(at); at += 4; if (length < 0) row.push(null); else { row.push(body.toString('utf8', at, at + length)); at += length } } rows.push(row) }
         }
       })
