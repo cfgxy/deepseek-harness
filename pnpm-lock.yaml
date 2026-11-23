@@ -1561,6 +1561,9 @@ importers:
       '@deepseek-ai/dsh-office-to-pdf':
         specifier: workspace:*
         version: link:../../document/office-to-pdf
+      '@deepseek-ai/dsh-panuoyun-account':
+        specifier: workspace:*
+        version: link:../../credentials/panuoyun-account
       '@deepseek-ai/dsh-permission-presets':
         specifier: workspace:*
         version: link:../../interaction/permission-presets
@@ -8077,21 +8080,6 @@ importers:
         specifier: workspace:~
         version: link:../../../vendor/cordis
 
-  packages/credentials/panuoyun-account:
-    devDependencies:
-      '@deepseek-ai/cordis':
-        specifier: workspace:~
-        version: link:../../../vendor/cordis
-      '@deepseek-ai/dsh-credentials':
-        specifier: workspace:*
-        version: link:../credentials
-      '@deepseek-ai/dsh-typert-protocol':
-        specifier: workspace:*
-        version: link:../../typert/protocol
-      '@deepseek-ai/schemastery':
-        specifier: workspace:~
-        version: link:../../../vendor/schemastery
-
   packages/credentials/credentials-local:
     dependencies:
       '@deepseek-ai/schemastery':
@@ -8162,6 +8150,25 @@ importers:
       '@deepseek-ai/dsh-host-webserver':
         specifier: workspace:*
         version: link:../../host/webserver
+
+  packages/credentials/panuoyun-account:
+    dependencies:
+      '@deepseek-ai/schemastery':
+        specifier: link:../../../vendor/schemastery
+        version: link:../../../vendor/schemastery
+    devDependencies:
+      '@deepseek-ai/cordis':
+        specifier: workspace:~
+        version: link:../../../vendor/cordis
+      '@deepseek-ai/dsh-credentials':
+        specifier: workspace:*
+        version: link:../credentials
+      '@deepseek-ai/dsh-settings':
+        specifier: workspace:*
+        version: link:../../settings/settings
+      '@deepseek-ai/dsh-typert-protocol':
+        specifier: workspace:*
+        version: link:../../typert/protocol
 
   packages/deliverables/deliverable-file-references:
     devDependencies:
@@ -28815,9 +28822,7 @@ snapshots:
       estraverse: 5.3.0
       picomatch: 4.0.4
 
-  '@swc/helpers@0.5.24':
-    dependencies:
-      tslib: 2.8.1
+  '@swc/helpers@0.5.24': {}
 
   '@szmarczak/http-timer@4.0.6':
     dependencies:

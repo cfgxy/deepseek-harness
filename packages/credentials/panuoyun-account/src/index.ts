@@ -2,7 +2,10 @@
 import type { Context, Volatile } from '@deepseek-ai/cordis'
 import z from '@deepseek-ai/schemastery'
 import { credentialRef } from '@deepseek-ai/dsh-credentials'
+import type { SettingsDescriptor, SettingsPathOp } from '@deepseek-ai/dsh-settings'
 import { Remote, TypertRemoteService } from '@deepseek-ai/dsh-typert-protocol'
+import type { PanuoyunGroup, PanuoyunModel } from './types.ts'
+export type { PanuoyunGroup, PanuoyunModel } from './types.ts'
 
 /** Personal and enterprise Pa诺云 deployments use disjoint fixed API origins. */
 export type PanuoyunMode = 'personal' | 'enterprise'
@@ -47,16 +50,9 @@ export const PANUOYUN_JWT_REF = credentialRef('PANUOYUN_JWT')
 /** The one explicit or newly-created key selected for the Harness provider. */
 export const PANUOYUN_API_KEY_REF = credentialRef('PANUOYUN_API_KEY')
 
-/** Safe fields of a Sub2API group. */
-export interface PanuoyunGroup {
-  readonly id: string
-  readonly name: string
-}
-
-/** A selected-key model. No upstream response body is retained after projection. */
-export interface PanuoyunModel {
-  readonly id: string
-}
+/** Route name and credential reference reserved for the one selected Pa诺云 key. */
+export const PANUOYUN_PROVIDER = 'panuoyun'
+export const PANUOYUN_LLM_SETTINGS_NAMESPACE = 'llm-pi-ai'
 
 /** Response failure that deliberately contains no request or credential payload. */
 export class PanuoyunError extends Error {
@@ -68,7 +64,7 @@ export class PanuoyunError extends Error {
 
 /** Host-owned account operations. Every network call is made from this process, never from app://. */
 export class PanuoyunAccount extends TypertRemoteService {
-  static inject = ['credentials']
+  static inject = ['credentials', 'settings']
   static Config = Config
   constructor(ctx: Context, private readonly config: Config) { super(ctx, 'panuoyunAccount', { namespace: 'panuoyun' }) }
 
@@ -101,7 +97,13 @@ export class PanuoyunAccount extends TypertRemoteService {
   async selectApiKey(key: string): Promise<readonly PanuoyunModel[]> {
     if (key.length === 0) throw new TypeError('Pa诺云 API key must not be empty')
     const models = await this.requestModels(key)
-    await this.ctx.credentials.set(PANUOYUN_API_KEY_REF, key)
+    await this.configureProvider(models)
+    try {
+      await this.ctx.credentials.set(PANUOYUN_API_KEY_REF, key)
+    } catch (error) {
+      await this.restoreProvider().catch(() => undefined)
+      throw error
+    }
     return models
   }
 
@@ -123,13 +125,17 @@ export class PanuoyunAccount extends TypertRemoteService {
   async models(): Promise<readonly PanuoyunModel[]> {
     const selected = await this.ctx.credentials.resolve(PANUOYUN_API_KEY_REF)
     if (selected === undefined) return []
-    return await this.requestModels(selected.value)
+    const models = await this.requestModels(selected.value)
+    await this.configureProvider(models)
+    return models
   }
 
   /** Sign out locally without exposing either secret or asking the browser to clear it. */
   @Remote
   async signOut(): Promise<void> {
+    const remove = this.removeProvider()
     await Promise.all([this.ctx.credentials.unset(PANUOYUN_JWT_REF), this.ctx.credentials.unset(PANUOYUN_API_KEY_REF)])
+    await remove
   }
 
   /** Resolve one operation's fixed API origin and its separately scoped login origin. */
@@ -149,6 +155,47 @@ export class PanuoyunAccount extends TypertRemoteService {
     if (response.status === 401) await this.ctx.credentials.unset(PANUOYUN_JWT_REF)
     if (!response.ok) throw new PanuoyunError(operation, response.status)
     return response
+  }
+
+  /** Write the validated discovery result as one profile while preserving explicit model fields a user already saved. */
+  private async configureProvider(models: readonly PanuoyunModel[]): Promise<void> {
+    const descriptor = this.settingsDescriptor()
+    const current = providerProfile(descriptor?.value) ?? {}
+    const previous = providerProfile(descriptor?.user)
+    const profile = {
+      ...current,
+      displayName: typeof current.displayName === 'string' ? current.displayName : '派诺云',
+      apiKeyEnv: String(PANUOYUN_API_KEY_REF),
+      api: 'openai-completions',
+      baseURL: `${this.connection().apiOrigin}/v1`,
+      models: mergeModels(current.models, models),
+    }
+    this.providerBeforeWrite = previous
+    await this.ctx.settings.mutate(PANUOYUN_LLM_SETTINGS_NAMESPACE, [{
+      op: 'set', path: ['providers', PANUOYUN_PROVIDER], value: profile,
+    }])
+  }
+
+  /** Remove the route owned by this integration before dropping its credential. */
+  private async removeProvider(): Promise<void> {
+    await this.ctx.settings.mutate(PANUOYUN_LLM_SETTINGS_NAMESPACE, [{
+      op: 'unset', path: ['providers', PANUOYUN_PROVIDER],
+    }])
+  }
+
+  /** Roll back the exact previous user-level route if credential persistence fails after a settings write. */
+  private async restoreProvider(): Promise<void> {
+    const previous = this.providerBeforeWrite
+    const op: SettingsPathOp = previous === undefined
+      ? { op: 'unset', path: ['providers', PANUOYUN_PROVIDER] }
+      : { op: 'set', path: ['providers', PANUOYUN_PROVIDER], value: previous }
+    await this.ctx.settings.mutate(PANUOYUN_LLM_SETTINGS_NAMESPACE, [op])
+  }
+
+  private providerBeforeWrite: Record<string, unknown> | undefined
+
+  private settingsDescriptor(): SettingsDescriptor | undefined {
+    return this.ctx.settings.describe().find(entry => entry.ns === PANUOYUN_LLM_SETTINGS_NAMESPACE)
   }
 
   private async requestModels(key: string): Promise<readonly PanuoyunModel[]> {
@@ -183,6 +230,23 @@ function groupOf(value: unknown): PanuoyunGroup[] {
 function modelOf(value: unknown): PanuoyunModel[] {
   if (!isObject(value) || typeof value.id !== 'string') return []
   return [{ id: value.id }]
+}
+
+/** Pull only the existing Pa诺云 profile from a redacted settings descriptor. */
+function providerProfile(value: unknown): Record<string, unknown> | undefined {
+  if (!isObject(value) || !isObject(value.providers) || !isObject(value.providers[PANUOYUN_PROVIDER])) return undefined
+  return structuredClone(value.providers[PANUOYUN_PROVIDER])
+}
+
+/** Existing entries carry any user override; unknown discovered models remain declaration-minimal. */
+function mergeModels(existing: unknown, discovered: readonly PanuoyunModel[]): Array<Record<string, unknown>> {
+  const saved = Array.isArray(existing) ? existing.filter(isModelProfile) : []
+  const byId = new Map(saved.map(model => [model.id, model]))
+  for (const model of discovered) if (!byId.has(model.id)) byId.set(model.id, { id: model.id })
+  return [...byId.values()]
+}
+function isModelProfile(value: unknown): value is Record<string, unknown> & { id: string } {
+  return isObject(value) && typeof value.id === 'string'
 }
 function isObject(value: unknown): value is Record<string, unknown> { return typeof value === 'object' && value !== null && !Array.isArray(value) }
 export default PanuoyunAccount

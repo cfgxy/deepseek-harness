@@ -14,11 +14,29 @@ function response(status: number, body: unknown): Response {
 async function mount(
   seed: Record<string, string> = {},
   config: { mode?: 'personal' | 'enterprise'; enterpriseLoginOrigin?: string } = {},
+  configuredProvider: Record<string, unknown> = {},
 ) {
   const ctx = new Context()
+  const settings = {
+    value: { providers: { ...configuredProvider } },
+    user: { providers: { ...configuredProvider } },
+    mutations: [] as Array<unknown>,
+  }
+  ctx.provide('settings', {
+    describe: () => [{ ns: 'llm-pi-ai', value: settings.value, user: settings.user }],
+    mutate: async (_ns: string, ops: Array<{ op: 'set' | 'unset'; path: string[]; value?: unknown }>) => {
+      settings.mutations.push(ops)
+      for (const op of ops) {
+        if (op.op === 'set') settings.value.providers.panuoyun = structuredClone(op.value)
+        else delete settings.value.providers.panuoyun
+        if (op.op === 'set') settings.user.providers.panuoyun = structuredClone(op.value)
+        else delete settings.user.providers.panuoyun
+      }
+    },
+  } as never)
   await ctx.plugin(MemoryCredentials, seed)
   const fiber = await ctx.plugin(PanuoyunAccount, config)
-  return { ctx, account: ctx.panuoyunAccount, dispose: () => fiber.dispose() }
+  return { ctx, account: ctx.panuoyunAccount, settings, dispose: () => fiber.dispose() }
 }
 
 afterEach(() => { vi.unstubAllGlobals() })
@@ -60,6 +78,47 @@ describe('PanuoyunAccount', () => {
       expect.any(Object),
     )
     await expect(test.ctx.credentials.resolve(PANUOYUN_API_KEY_REF)).resolves.toBeUndefined()
+    expect(test.settings.value.providers.panuoyun).toBeUndefined()
+    await test.dispose()
+  })
+
+  it('atomically saves the personal route only after selected-key model discovery', async () => {
+    const fetch = vi.fn(async () => response(200, { data: [{ id: 'gpt-5.6-terra' }] }))
+    vi.stubGlobal('fetch', fetch)
+    const test = await mount()
+
+    await expect(test.account.selectApiKey('selected-secret')).resolves.toEqual([{ id: 'gpt-5.6-terra' }])
+    expect(test.settings.value.providers.panuoyun).toEqual({
+      displayName: '派诺云', apiKeyEnv: 'PANUOYUN_API_KEY', api: 'openai-completions',
+      baseURL: 'https://api.apinoria.com/v1', models: [{ id: 'gpt-5.6-terra' }],
+    })
+    expect(JSON.stringify(test.settings.value)).not.toContain('selected-secret')
+    await test.dispose()
+  })
+
+  it('rolls back the route if saving a verified key fails', async () => {
+    const fetch = vi.fn(async () => response(200, { data: [{ id: 'model-a' }] }))
+    vi.stubGlobal('fetch', fetch)
+    const test = await mount()
+    vi.spyOn(test.ctx.credentials, 'set').mockRejectedValueOnce(new Error('credential disk unavailable'))
+
+    await expect(test.account.selectApiKey('selected-secret')).rejects.toThrow('credential disk unavailable')
+    expect(test.settings.value.providers.panuoyun).toBeUndefined()
+    await test.dispose()
+  })
+
+  it('refreshes the enterprise route without overwriting a saved model override', async () => {
+    const fetch = vi.fn(async () => response(200, { data: [{ id: 'gpt-5.6-terra' }, { id: 'model-new' }] }))
+    vi.stubGlobal('fetch', fetch)
+    const test = await mount({ PANUOYUN_API_KEY: 'selected-secret' }, {
+      mode: 'enterprise', enterpriseLoginOrigin: 'https://tenant.ainoriahub.com',
+    }, { panuoyun: { models: [{ id: 'gpt-5.6-terra', input: ['text', 'image'] }] } })
+
+    await expect(test.account.models()).resolves.toEqual([{ id: 'gpt-5.6-terra' }, { id: 'model-new' }])
+    expect(test.settings.value.providers.panuoyun).toMatchObject({
+      apiKeyEnv: 'PANUOYUN_API_KEY', api: 'openai-completions', baseURL: 'https://api.ainoriahub.com/v1',
+      models: [{ id: 'gpt-5.6-terra', input: ['text', 'image'] }, { id: 'model-new' }],
+    })
     await test.dispose()
   })
 

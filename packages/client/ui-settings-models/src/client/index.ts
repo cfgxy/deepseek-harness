@@ -8,6 +8,7 @@
  */
 import type {} from '@deepseek-ai/dsh-client-product-analytics/client'
 import type { Context as ClientContext } from '@deepseek-ai/cordis'
+import type { SettingsPathOpView } from '@deepseek-ai/dsh-api-remotes/client'
 // Type-only: pulls the shell's SlotMap merge (the 'settings.section' entry).
 import type {} from '@deepseek-ai/dsh-client-ui-settings/client'
 // Type-only: pulls the locale plugin's Context merge (ctx.locale).
@@ -20,6 +21,8 @@ import { ModelsSection } from './ModelsSection.tsx'
 import type { ModelsSectionInjected } from './ModelsSection.tsx'
 import { DeepSeekOnboardingDialog } from './DeepSeekOnboardingDialog.tsx'
 import type { DeepSeekOnboardingInjected } from './DeepSeekOnboardingDialog.tsx'
+import { PanuoyunOnboardingDialog } from './PanuoyunOnboardingDialog.tsx'
+import type { PanuoyunOnboardingInjected, PanuoyunOnboardingOperations } from './PanuoyunOnboardingDialog.tsx'
 import { WelcomeNotice } from './WelcomeNotice.tsx'
 import type { WelcomeNoticeInjected } from './WelcomeNotice.tsx'
 import { WelcomeNoticeStore } from './welcome-store.ts'
@@ -65,7 +68,7 @@ export function refreshIfLoaded(controller: ModelsSettingsStore): void {
  * constrained; registration depends on each slot through `slots.inject()`.
  */
 export const inject = [
-  'slots', 'locale', 'remote', 'remote.credentials', 'remote.llm', 'remote.settings', 'remote.session',
+  'slots', 'locale', 'remote', 'remote.credentials', 'remote.llm', 'remote.settings', 'remote.session', 'remote.panuoyun',
   'configForms', 'settingsSchema',
 ]
 
@@ -75,6 +78,49 @@ export const inject = [
  * pushed invalidation (settings, credentials, or provider topology).
  * @param ctx - client root context.
  */
+type RemoteResult = { ok: boolean; value?: unknown }
+type PanuoyunRemote = {
+  login(email: string, password: string): Promise<RemoteResult>
+  groups(): Promise<RemoteResult>
+  selectApiKey(key: string): Promise<RemoteResult>
+  createApiKey(name: string, groupId?: number): Promise<RemoteResult>
+  signOut(): Promise<RemoteResult>
+}
+type SettingsRemote = { mutate(ns: string, ops: SettingsPathOpView[], revision: undefined): Promise<RemoteResult> }
+function isPanuoyunGroup(value: unknown): value is { id: string; name: string } {
+  return typeof value === 'object' && value !== null
+    && 'id' in value && typeof value.id === 'string'
+    && 'name' in value && typeof value.name === 'string'
+}
+
+/** Bind safe result-only Pa诺云 calls; values are never JWTs or API keys. */
+function createPanuoyunOperations(ctx: ClientContext): PanuoyunOnboardingOperations {
+  const remotes = ctx.remote as unknown as { panuoyun: PanuoyunRemote; settings: SettingsRemote }
+  const remote = remotes.panuoyun
+  const required = async (call: Promise<RemoteResult>): Promise<unknown> => {
+    const result = await call
+    if (!result.ok) throw new Error('Pa诺云 request failed')
+    return result.value
+  }
+  return {
+    async configure(mode, enterpriseLoginOrigin) {
+      const result = await remotes.settings.mutate('panuoyun-account', [
+        { op: 'set', path: ['mode'], value: mode },
+        { op: 'set', path: ['enterpriseLoginOrigin'], value: enterpriseLoginOrigin },
+      ], undefined)
+      if (!result.ok) throw new Error('Pa诺云 configuration failed')
+    },
+    login: async (email, password) => { await required(remote.login(email, password)) },
+    groups: async () => {
+      const groups = await required(remote.groups())
+      return Array.isArray(groups) ? groups.filter(isPanuoyunGroup) : []
+    },
+    selectApiKey: async (key) => { await required(remote.selectApiKey(key)) },
+    createApiKey: async (name, groupId) => { await required(remote.createApiKey(name, groupId)) },
+    signOut: async () => { await required(remote.signOut()) },
+  }
+}
+
 export function apply(ctx: ClientContext): void {
   const page = globalThis as Partial<Record<typeof ONBOARDING_CONFIG_GLOBAL, unknown>>
   const payload = page[ONBOARDING_CONFIG_GLOBAL]
@@ -95,6 +141,15 @@ export function apply(ctx: ClientContext): void {
     hooks: { snapshot: controller.store },
     operations,
     schema,
+    t,
+  })
+  const panuoyun = createPanuoyunOperations(ctx)
+  const panuoyunOnboardingInjected = (): PanuoyunOnboardingInjected => ({
+    automatic: credentialOnboarding,
+    controller,
+    hooks: { models: controller.store },
+    operations,
+    panuoyun,
     t,
   })
   const deepSeekOnboardingInjected = (): DeepSeekOnboardingInjected => ({
@@ -150,6 +205,12 @@ export function apply(ctx: ClientContext): void {
     order: -100,
     inject: welcomeInjected,
   }, WelcomeNotice))
+  ctx.slots.inject('settings.onboarding', () => ctx.slots.register({
+    name: 'settings.onboarding',
+    id: 'panuoyun',
+    order: -10,
+    inject: panuoyunOnboardingInjected,
+  }, PanuoyunOnboardingDialog))
   ctx.slots.inject('settings.onboarding', () => ctx.slots.register({
     name: 'settings.onboarding',
     id: 'deepseek-official',
