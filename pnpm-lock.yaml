@@ -10059,6 +10059,35 @@ importers:
         specifier: ^0.35.3
         version: 0.35.5(@types/node@22.20.1)
 
+  packages/experimental/enterprise-runtime:
+    dependencies:
+      '@deepseek-ai/schemastery':
+        specifier: workspace:~
+        version: link:../../../vendor/schemastery
+      yauzl:
+        specifier: ^3.4.0
+        version: 3.4.0
+    devDependencies:
+      '@deepseek-ai/cordis':
+        specifier: workspace:~
+        version: link:../../../vendor/cordis
+      '@deepseek-ai/dsh-system-prompt':
+        specifier: workspace:*
+        version: link:../../core/system-prompt
+      '@deepseek-ai/dsh-tools':
+        specifier: workspace:*
+        version: link:../../core/tools
+      '@types/yauzl':
+        specifier: ^2.10.3
+        version: 2.10.3
+    peerDependencies:
+      '@deepseek-ai/cordis':
+        specifier: workspace:~
+        version: link:../../../vendor/cordis
+      '@deepseek-ai/dsh-tools':
+        specifier: workspace:*
+        version: link:../../core/tools
+
   packages/experimental/forge:
     dependencies:
       '@deepseek-ai/dsh-brand':
