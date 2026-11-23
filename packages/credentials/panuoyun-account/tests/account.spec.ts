@@ -24,8 +24,8 @@ async function mount(
 afterEach(() => { vi.unstubAllGlobals() })
 
 describe('PanuoyunAccount', () => {
-  it('stores a successful login JWT in Host credentials without returning it', async () => {
-    const fetch = vi.fn(async () => response(200, { data: { token: 'jwt-secret' } }))
+  it('stores an access_token login envelope in Host credentials without returning it', async () => {
+    const fetch = vi.fn(async () => response(200, { code: 0, data: { access_token: 'jwt-secret' } }))
     vi.stubGlobal('fetch', fetch)
     const test = await mount()
 
@@ -33,7 +33,7 @@ describe('PanuoyunAccount', () => {
     await expect(test.ctx.credentials.resolve(PANUOYUN_JWT_REF)).resolves.toMatchObject({ value: 'jwt-secret' })
     expect(fetch).toHaveBeenCalledWith(
       'https://api.apinoria.com/api/v1/auth/login',
-      expect.objectContaining({ method: 'POST' }),
+      expect.objectContaining({ method: 'POST', body: JSON.stringify({ email: 'member@example.com', password: 'password-secret' }) }),
     )
     await test.dispose()
   })
@@ -65,26 +65,26 @@ describe('PanuoyunAccount', () => {
 
   it('creates, verifies, and stores one dedicated key without calling the key-list endpoint', async () => {
     const fetch = vi.fn<typeof globalThis.fetch>()
-    fetch.mockResolvedValueOnce(response(200, { data: { key: 'new-key-secret' } }))
+    fetch.mockResolvedValueOnce(response(200, { code: 0, data: { key: 'new-key-secret' } }))
     fetch.mockResolvedValueOnce(response(200, { data: [{ id: 'gpt-5.6-terra' }] }))
     vi.stubGlobal('fetch', fetch)
     const test = await mount({ PANUOYUN_JWT: 'jwt-secret' })
 
-    await expect(test.account.createApiKey('DeepSeek Harness', 'research')).resolves.toEqual([{ id: 'gpt-5.6-terra' }])
+    await expect(test.account.createApiKey('DeepSeek Harness', 42)).resolves.toEqual([{ id: 'gpt-5.6-terra' }])
     await expect(test.ctx.credentials.resolve(PANUOYUN_API_KEY_REF)).resolves.toMatchObject({ value: 'new-key-secret' })
-    expect(fetch).toHaveBeenNthCalledWith(1, 'https://api.apinoria.com/api/v1/keys', expect.any(Object))
+    expect(fetch).toHaveBeenNthCalledWith(1, 'https://api.apinoria.com/api/v1/keys', expect.objectContaining({ body: JSON.stringify({ name: 'DeepSeek Harness', group_id: 42 }) }))
     expect(fetch).toHaveBeenNthCalledWith(2, 'https://api.apinoria.com/v1/models', expect.any(Object))
     await test.dispose()
   })
 
   it('lists safe group and model identifiers, and logout removes both Host credentials', async () => {
     const fetch = vi.fn()
-      .mockResolvedValueOnce(response(200, [{ id: 'research', name: 'Research' }]))
+      .mockResolvedValueOnce(response(200, { code: 0, data: [{ id: 42, name: 'Research' }] }))
       .mockResolvedValueOnce(response(200, { data: [{ id: 'model-a' }] }))
     vi.stubGlobal('fetch', fetch)
     const test = await mount({ PANUOYUN_JWT: 'jwt-secret', PANUOYUN_API_KEY: 'selected-secret' })
 
-    await expect(test.account.groups()).resolves.toEqual([{ id: 'research', name: 'Research' }])
+    await expect(test.account.groups()).resolves.toEqual([{ id: '42', name: 'Research' }])
     await expect(test.account.models()).resolves.toEqual([{ id: 'model-a' }])
     await test.account.signOut()
     await expect(test.ctx.credentials.resolve(PANUOYUN_JWT_REF)).resolves.toBeUndefined()
@@ -93,7 +93,7 @@ describe('PanuoyunAccount', () => {
   })
 
   it('rejects a malformed login response without storing a JWT', async () => {
-    vi.stubGlobal('fetch', vi.fn(async () => response(200, { data: {} })))
+    vi.stubGlobal('fetch', vi.fn(async () => response(200, { code: 0, data: {} })))
     const test = await mount()
 
     await expect(test.account.login('member@example.com', 'password-secret')).rejects.toBeInstanceOf(PanuoyunError)
@@ -102,7 +102,7 @@ describe('PanuoyunAccount', () => {
   })
 
   it('uses the personal API origin by default', async () => {
-    const fetch = vi.fn(async () => response(200, { data: { token: 'jwt-secret' } }))
+    const fetch = vi.fn(async () => response(200, { code: 0, data: { access_token: 'jwt-secret' } }))
     vi.stubGlobal('fetch', fetch)
     const test = await mount()
 
@@ -113,8 +113,8 @@ describe('PanuoyunAccount', () => {
 
   it('uses the enterprise login origin only for login, preserving the fixed enterprise API origin', async () => {
     const fetch = vi.fn()
-      .mockResolvedValueOnce(response(200, { data: { token: 'jwt-secret' } }))
-      .mockResolvedValueOnce(response(200, [{ id: 'engineering', name: 'Engineering' }]))
+      .mockResolvedValueOnce(response(200, { code: 0, data: { access_token: 'jwt-secret' } }))
+      .mockResolvedValueOnce(response(200, { code: 0, data: [{ id: 7, name: 'Engineering' }] }))
     vi.stubGlobal('fetch', fetch)
     const test = await mount({ PANUOYUN_JWT: 'existing-jwt' }, {
       mode: 'enterprise', enterpriseLoginOrigin: 'https://tenant.ainoriahub.com',

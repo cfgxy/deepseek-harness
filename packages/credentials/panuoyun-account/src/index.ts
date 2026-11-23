@@ -74,11 +74,11 @@ export class PanuoyunAccount extends TypertRemoteService {
 
   /** Authenticate with the configured Pa诺云 mode and replace only the stored JWT after a successful response. */
   @Remote
-  async login(username: string, password: string): Promise<void> {
+  async login(email: string, password: string): Promise<void> {
     const connection = this.connection()
     const response = await fetch(`${connection.loginOrigin}/api/v1/auth/login`, {
       method: 'POST', headers: { accept: 'application/json', 'content-type': 'application/json' },
-      body: JSON.stringify({ username, password }),
+      body: JSON.stringify({ email, password }),
     })
     const payload: unknown = await response.json().catch(() => undefined)
     if (!response.ok) throw new PanuoyunError('login', response.status)
@@ -92,8 +92,8 @@ export class PanuoyunAccount extends TypertRemoteService {
   async groups(): Promise<readonly PanuoyunGroup[]> {
     const response = await this.authorized('/api/v1/groups/available', 'groups')
     const payload: unknown = await response.json().catch(() => undefined)
-    if (!Array.isArray(payload)) return []
-    return payload.flatMap(groupOf)
+    const groups = isObject(payload) && Array.isArray(payload.data) ? payload.data : []
+    return groups.flatMap(groupOf)
   }
 
   /** Store an explicitly typed/selected key only after it passes `/v1/models`. */
@@ -107,10 +107,10 @@ export class PanuoyunAccount extends TypertRemoteService {
 
   /** Create a dedicated key with the JWT, then verify and store the returned one without listing existing keys. */
   @Remote
-  async createApiKey(name: string, group?: string): Promise<readonly PanuoyunModel[]> {
+  async createApiKey(name: string, groupId?: number): Promise<readonly PanuoyunModel[]> {
     const response = await this.authorized('/api/v1/keys', 'create-key', {
       method: 'POST', headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ name, ...(group === undefined ? {} : { group }) }),
+      body: JSON.stringify({ name, ...(groupId === undefined ? {} : { group_id: groupId }) }),
     })
     const payload: unknown = await response.json().catch(() => undefined)
     const key = keyOf(payload)
@@ -166,7 +166,7 @@ declare module '@deepseek-ai/cordis' { interface Context { panuoyunAccount: Panu
 /** Extract a token from documented and deployed login response wrappers. */
 function tokenOf(value: unknown): string | undefined {
   const candidates = [value, isObject(value) ? value.data : undefined]
-  for (const candidate of candidates) if (isObject(candidate) && typeof candidate.token === 'string' && candidate.token.length > 0) return candidate.token
+  for (const candidate of candidates) if (isObject(candidate) && typeof candidate.access_token === 'string' && candidate.access_token.length > 0) return candidate.access_token
   return undefined
 }
 
@@ -177,8 +177,8 @@ function keyOf(value: unknown): string | undefined {
   return undefined
 }
 function groupOf(value: unknown): PanuoyunGroup[] {
-  if (!isObject(value) || typeof value.id !== 'string' || typeof value.name !== 'string') return []
-  return [{ id: value.id, name: value.name }]
+  if (!isObject(value) || (typeof value.id !== 'number' && typeof value.id !== 'string') || typeof value.name !== 'string') return []
+  return [{ id: String(value.id), name: value.name }]
 }
 function modelOf(value: unknown): PanuoyunModel[] {
   if (!isObject(value) || typeof value.id !== 'string') return []
