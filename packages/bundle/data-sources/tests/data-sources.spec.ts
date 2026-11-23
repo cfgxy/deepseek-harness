@@ -1,10 +1,12 @@
 import { mkdtemp, mkdir, rm, symlink, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
+import { createServer } from 'node:net'
 import { describe, expect, it, vi } from 'vitest'
 import { Context } from '@deepseek-ai/cordis'
 import { Config as BundleConfig, DataSourcesRemote } from '../src/index.ts'
 import { LocalDirectoryConnector } from '../src/local-directory.ts'
+import { PostgreSqlConnector } from '../src/postgresql.ts'
 import { ConnectorSupervisor, type ConnectorRequest, type ReadConnector } from '../src/supervisor.ts'
 import type { ReadOperation, SourceConfig, SourceKind } from '../src/types.ts'
 
@@ -183,6 +185,30 @@ describe('read-only data source supervisor', () => {
     } finally {
       await rm(root, { recursive: true, force: true })
       await rm(outside, { recursive: true, force: true })
+    }
+  })
+
+  it('rejects an oversized PostgreSQL frame before its body is materialized', async () => {
+    const server = createServer((socket) => {
+      socket.once('data', () => {
+        const header = Buffer.alloc(5)
+        header[0] = 'R'.charCodeAt(0)
+        header.writeUInt32BE(1024 * 1024 + 5, 1)
+        socket.write(header)
+      })
+    })
+    await new Promise<void>((resolve) => { server.listen(0, '127.0.0.1', resolve) })
+    const address = server.address()
+    if (address === null || typeof address === 'string') throw new Error('fixture server has no TCP port')
+    try {
+      const postgres: SourceConfig = {
+        ...source('postgresql'),
+        connection: { host: '127.0.0.1', port: address.port, database: 'fixture', timeoutMs: 1_000 },
+      }
+      await expect(new PostgreSqlConnector().probe({ source: postgres, credential: JSON.stringify({ username: 'fixture' }) }))
+        .rejects.toThrow('protocol message exceeds the memory limit')
+    } finally {
+      await new Promise<void>((resolve, reject) => server.close(error => error === undefined ? resolve() : reject(error)))
     }
   })
 

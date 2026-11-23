@@ -3,6 +3,9 @@ import net from 'node:net'
 import { createHash } from 'node:crypto'
 import type { ConnectorRequest, ReadConnector } from './supervisor.ts'
 import type { ReadResult } from './types.ts'
+
+/** Upper bound prevents a hostile peer from forcing unbounded packet/row buffering. */
+const MAX_PROTOCOL_PACKET_BYTES = 1024 * 1024
 function auth(value: string | undefined): { username: string; password: string } { if (!value) throw new Error('data-sources: MySQL credential is required'); try { const v = JSON.parse(value) as Record<string, unknown>; if (typeof v.username === 'string' && typeof v.password === 'string') return { username: v.username, password: v.password } } catch {}; throw new Error('data-sources: MySQL credential must be JSON with username and password') }
 function packet(payload: Buffer, sequence: number): Buffer { const h = Buffer.alloc(4); h.writeUIntLE(payload.length, 0, 3); h[3] = sequence; return Buffer.concat([h, payload]) }
 function nul(value: string): Buffer { return Buffer.from(`${value}\0`) }
@@ -25,10 +28,17 @@ export class MysqlConnector implements ReadConnector {
     let emittedBytes = 0
     let truncated = false
     const send = (body: Buffer, seq: number) => socket.write(packet(body, seq))
-    let waiter: ((value: Buffer) => void) | undefined
-    const take = (): Buffer | undefined => { if (buffer.length < 4) return undefined; const n = buffer.readUIntLE(0, 3); if (buffer.length < n + 4) return undefined; const body = buffer.subarray(4, n + 4); buffer = buffer.subarray(n + 4); return body }
-    socket.on('data', (data) => { buffer = Buffer.concat([buffer, data]); const item = take(); if (item !== undefined && waiter !== undefined) { const resolve = waiter; waiter = undefined; resolve(item) } })
-    const next = (): Promise<Buffer> => new Promise((resolve, reject) => { const item = take(); if (item !== undefined) resolve(item); else { waiter = resolve; socket.once('error', reject) } })
+    let waiter: { resolve: (value: Buffer) => void; reject: (error: Error) => void } | undefined
+    let protocolError: Error | undefined
+    const take = (): Buffer | undefined => { if (buffer.length < 4) return undefined; const n = buffer.readUIntLE(0, 3); if (n > MAX_PROTOCOL_PACKET_BYTES) { protocolError = new Error('data-sources: MySQL protocol packet exceeds the memory limit'); return undefined } if (buffer.length < n + 4) return undefined; const body = buffer.subarray(4, n + 4); buffer = buffer.subarray(n + 4); return body }
+    socket.on('data', (data) => {
+      if (buffer.length + data.length > MAX_PROTOCOL_PACKET_BYTES + 4) protocolError = new Error('data-sources: MySQL protocol packet exceeds the memory limit')
+      else buffer = Buffer.concat([buffer, data])
+      const item = take(); const pending = waiter
+      if (protocolError !== undefined) { socket.destroy(); waiter = undefined; pending?.reject(protocolError); return }
+      if (item !== undefined && pending !== undefined) { waiter = undefined; pending.resolve(item) }
+    })
+    const next = (): Promise<Buffer> => new Promise((resolve, reject) => { if (protocolError !== undefined) { reject(protocolError); return } const item = take(); if (protocolError !== undefined) reject(protocolError); else if (item !== undefined) resolve(item); else waiter = { resolve, reject } })
     await new Promise<void>((resolve, reject) => { socket.once('connect', resolve); socket.once('error', reject) })
     try {
       const hello = await next(); let at = 1; const serverEnd = hello.indexOf(0, at); const serverVersion = hello.toString('utf8', at, serverEnd); at = serverEnd + 1 + 4; const seed1 = hello.subarray(at, at + 8); at += 9; const capsLow = hello.readUInt16LE(at); at += 2 + 1 + 2; const capsHigh = hello.readUInt16LE(at); at += 2; const caps = (capsLow | (capsHigh << 16)) >>> 0; const authLength = hello[at++]!; at += 10; const seed2 = hello.subarray(at, at + Math.max(13, authLength - 8)).subarray(0, 12); const pluginAt = hello.indexOf(0, at + Math.max(13, authLength - 8)); const plugin = hello.toString('utf8', at + Math.max(13, authLength - 8), pluginAt < 0 ? undefined : pluginAt)

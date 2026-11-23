@@ -4,6 +4,9 @@ import { createHash } from 'node:crypto'
 import type { ConnectorRequest, ReadConnector } from './supervisor.ts'
 import type { ReadResult } from './types.ts'
 
+/** Upper bound prevents a hostile peer from forcing unbounded frame/row buffering. */
+const MAX_PROTOCOL_MESSAGE_BYTES = 1024 * 1024
+
 function auth(value: string | undefined): { username: string; password?: string } {
   if (!value) throw new Error('data-sources: PostgreSQL credential is required')
   try { const v = JSON.parse(value) as Record<string, unknown>; if (typeof v.username === 'string') return { username: v.username, ...(typeof v.password === 'string' ? { password: v.password } : {}) } } catch {}
@@ -42,7 +45,10 @@ export class PostgreSqlConnector implements ReadConnector {
     socket.write(startup)
     const done = new Promise<void>((resolve, reject) => {
       socket.on('error', reject); socket.on('data', (data) => {
-        buffer = Buffer.concat([buffer, data]); while (buffer.length >= 5) { const type = String.fromCharCode(buffer[0]!); const len = buffer.readUInt32BE(1); if (buffer.length < len + 1) return; const body = buffer.subarray(5, len + 1); buffer = buffer.subarray(len + 1)
+        if (buffer.length + data.length > MAX_PROTOCOL_MESSAGE_BYTES + 5) {
+          socket.destroy(); reject(new Error('data-sources: PostgreSQL protocol message exceeds the memory limit')); return
+        }
+        buffer = Buffer.concat([buffer, data]); while (buffer.length >= 5) { const type = String.fromCharCode(buffer[0]!); const len = buffer.readUInt32BE(1); if (len < 4 || len > MAX_PROTOCOL_MESSAGE_BYTES + 4) { socket.destroy(); reject(new Error('data-sources: PostgreSQL protocol message exceeds the memory limit')); return } if (buffer.length < len + 1) return; const body = buffer.subarray(5, len + 1); buffer = buffer.subarray(len + 1)
           if (type === 'R') { const code = body.readUInt32BE(0); if (code === 0) continue; if (code === 3 && credential.password) socket.write(message('p', cstring(credential.password))); else if (code === 5 && credential.password) { const salt = body.subarray(4, 8); const inner = createHash('md5').update(`${credential.password}${credential.username}`).digest('hex'); const value = `md5${createHash('md5').update(Buffer.concat([Buffer.from(inner), salt])).digest('hex')}`; socket.write(message('p', cstring(value))) } else reject(new Error('data-sources: PostgreSQL authentication method is unsupported'))
           } else if (type === 'Z') {
             if (!ready) {
