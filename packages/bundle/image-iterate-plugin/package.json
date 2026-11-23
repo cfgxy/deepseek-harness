@@ -56,6 +56,7 @@
     "@deepseek-ai/dsh-client-locale": "workspace:*",
     "@deepseek-ai/dsh-client-store": "workspace:*",
     "@deepseek-ai/dsh-client-ui-attachment": "workspace:*",
+    "@deepseek-ai/dsh-client-ui-chat": "workspace:*",
     "@deepseek-ai/dsh-client-ui-conversation": "workspace:*",
     "@deepseek-ai/dsh-client-ui-plugin-manager": "workspace:*",
     "@deepseek-ai/dsh-client-ui-primitives": "workspace:*",
@@ -65,6 +66,7 @@
     "@deepseek-ai/dsh-client-ui-tool": "workspace:*",
     "@deepseek-ai/dsh-credentials": "workspace:*",
     "@deepseek-ai/dsh-llm": "workspace:*",
+    "@deepseek-ai/dsh-system-prompt": "workspace:*",
     "@deepseek-ai/dsh-tools": "workspace:*",
     "@deepseek-ai/dsh-user-questions": "workspace:*",
     "react": "^18.2.0"
@@ -80,6 +82,7 @@
         "@deepseek-ai/dsh-client-ui-plugin-manager",
         "@deepseek-ai/dsh-api-remotes",
         "@deepseek-ai/dsh-client-ui-tool",
+        "@deepseek-ai/dsh-client-ui-chat",
         "@deepseek-ai/dsh-client-ui-conversation",
         "@deepseek-ai/dsh-client-ui-attachment"
       ],
@@ -87,7 +90,7 @@
     }
   },
   "scripts": {
-    "test": "node --test test/*.test.mjs",
+    "test": "tsx --tsconfig ../../../tsconfig.base.json --test test/*.test.mjs",
     "test:composition": "pnpm -C ../../.. exec vitest run --config vitest.web.config.ts apps/web/tests/image-iterate-client.e2e.ts"
   }
 }

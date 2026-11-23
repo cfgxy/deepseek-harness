@@ -66,6 +66,7 @@ function profileWithImage(baseURL = 'https://gateway.test/v1') {
       models: [
         { id: 'vision-current', input: ['text', 'image'] },
         { id: 'text-only', input: ['text'] },
+        { id: 'gpt-image-2' },
       ],
       image: {
         model: 'image-model',

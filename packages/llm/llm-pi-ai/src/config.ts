@@ -184,7 +184,7 @@ export interface PiAiProviderProfile {
   retryPolicy?: RetryPolicyConfig
 }
 
-/** Provider-owned image generation declaration; omission means no image route. */
+/** Explicit provider-owned image route, used instead of discovery from configured models. */
 export interface PiAiImageProfile {
   /** Model id sent to `POST /images/generations`. */
   model: string

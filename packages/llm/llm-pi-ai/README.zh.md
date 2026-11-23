@@ -114,7 +114,9 @@ profile 的 `models` 列表会替换而非扩展路由的已安装目录；每�
 
 ### Provider-owned 图像能力
 
-只有显式配置 `image.model` 的 provider 才会向 `ImageCapabilityRegistry` 注册图像生成能力。该能力使用当前 profile 的 `baseURL`、`apiKeyEnv` 凭据解析、`headers` 和 `llm-pi-ai/request-headers` waterfall，分别调用 OpenAI-compatible 的 `/images/generations` 与 `/chat/completions`。`reviewModel` 用于没有当前视觉模型时的审核；profile 模型目录中声明 `input: [text, image]` 的当前模型会同时注册为审核路由，因此 image plugin 不需要重复配置 endpoint、model 或 credential。profile 更新会卸载旧能力并重建新能力，provider fiber 销毁时清理全部能力；没有 `image` 声明不会注册任何图像能力。
+`openai-completions` profile 可提供生图和审核，无需在插件里重复配置。`image.model` 优先于自动发现。否则，适配器按以下顺序选择已配置的第一个精确 ID：`gpt-image-2`、`gpt-image-2.6-flare`、`gpt-image-2.6-sunburst`、`gpt-image-2.5-flare`、`gpt-image-2.5-sunburst`。适配器不会发送探测请求，也不会假定其他模型 ID 或协议支持 Images API。
+
+适配器独立注册生图和审核路由。自动审核要求同一个 OpenAI Chat Completions profile 的模型元数据同时声明文本和图像输入，并排除已知生图 ID。插件优先选当前聊天模型的可用审核路由，其次是已配置的 `image.reviewModel`，最后是首个已注册的审核模型。两类操作复用 profile 的 `baseURL`、`apiKeyEnv` 凭据解析、`headers` 和 `llm-pi-ai/request-headers` waterfall，分别调用 `/images/generations` 和 `/chat/completions`。profile 更新时替换路由，provider fiber 销毁时移除路由。
 
 生成响应必须包含有效 `b64_json`，审核响应必须是 `{"accepted": boolean, "feedback": string}`。网络失败、取消、无效响应和缺失凭据会以稳定错误码失败，不会自动重试未知请求结果。
 

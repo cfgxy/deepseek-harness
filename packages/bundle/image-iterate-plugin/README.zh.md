@@ -9,7 +9,7 @@ kind: "package-bundle"
 
 ## 概述
 
-本组合包为 Web/Desktop 组合提供内置的 `generate_image_with_review` 工具。它优先读取当前聊天的 provider/model，并通过 provider-owned capability 获取受控的图像生成和视觉审核 closure；只有审核拒绝且未达到配置上限时才会再次生成。没有唯一 capability、能力元数据未知或关键参数无法确定时，工具会通过 `ctx.userQuestions.ask` 请求用户选择。该 package 由随附的 Web bundle 注册，因此用户不需要执行 `dsh plugin add`。
+本组合包为 Web/Desktop 组合提供内置的 `generate_image_with_review` 工具。它优先读取当前聊天的 provider/model，并通过 provider-owned capability 获取受控的图像生成和视觉审核 closure；只有审核拒绝且未达到配置上限时才会再次生成。缺少任一路由时，工具会在生图前报告；同一 provider 有多个同等优先的生图路由时，工具才会请用户选择。该 package 由随附的 Web bundle 注册，因此用户不需要执行 `dsh plugin add`。
 
 ## 目录
 
@@ -27,7 +27,7 @@ kind: "package-bundle"
 <a id="use-this-package"></a>
 ## 使用本包
 
-随附的 Web/Desktop bundle 始终包含该插件配置项。在目标 profile 的 `cordis.patch.yml` 中配置已有的 `image-iterate-plugin` 配置项；不要添加第二个插件配置项，也不要把密钥复制到 patch 中。
+在 Web 或 Desktop 对话里直接提出生图请求。插件设置留空时，使用当前 provider 已有的生图和视觉模型。保存后的图片直接显示在聊天中。
 
 <a id="configuration"></a>
 ## 配置
@@ -51,7 +51,7 @@ kind: "package-bundle"
     outputFormat: png
 ```
 
-显式覆盖模式下，插件在每次工具调用时重新解析图像和审核凭据，因此凭据轮换无需重启进程。如果图像生成与视觉审核需要不同的访问权限或审计范围，应保持两个引用独立。当两个覆盖角色完整配置且调用带有 agent provider 路由时，插件会注册一个临时 provider-owned capability，由其中的 closure 解析凭据，并在 `finally` 中卸载；没有 agent 的调用仍保留显式直接 fallback。自动继承模式下，provider 负责 endpoint 和凭据，插件只接收受控 closure。
+每组完整覆盖只替换本次调用中对应的角色。另一组留空时，该角色继续使用当前 provider。显式覆盖的凭据在执行时解析；自动路由的凭据和地址由当前 provider 管理。
 
 <a id="provider-capability-registration"></a>
 ## Provider capability 注册
@@ -96,7 +96,7 @@ ctx.effect(() => registry.register({
 纯 HTTP 与有限迭代测试使用 provider mock：
 
 ```sh
-node --test packages/bundle/image-iterate-plugin/test/*.test.mjs
+pnpm --filter @deepseek-ai/dsh-image-iterate-plugin test
 ```
 
 随附的 Web 组合测试会加载实际 Web bundle、ModuleLoader/profile 注册、provider-owned capability 路由、attachment loader 与官方 gallery 路径：
@@ -129,7 +129,7 @@ shipped provider 路由使用测试自有的 loopback HTTP server，只能作为
 
 <a id="known-limitations-and-deferred-work"></a>
 
-- **随附的 Web/Desktop profile 自身不提供图像路由**：自动继承只在其他 provider 插件注册 capability 后可用；否则必须配置包含授权兼容 endpoint、model 和凭据引用的两组 override。
+- **当前 provider 必须有兼容的生图与视觉模型。** 支持自动识别的模型见 [pi-ai 适配器](../../llm/llm-pi-ai/README.zh.md)。任一角色缺失时，工具会在发出生图请求前报告。
 - **本地测试不能证明真实 provider 兼容性**：仍需单独核对 provider 的 endpoint 行为、模型可用性、凭据权限、额度和响应字段。
 - **审核精度取决于配置的视觉模型**：插件会强制校验返回 JSON 并限制迭代次数，但不能保证主观验收标准一定被正确判断。
 - **内置配置项没有交互式凭据编辑器**：配置路径仍是 profile patch 或 DSH credential service。
@@ -140,6 +140,6 @@ shipped provider 路由使用测试自有的 loopback HTTP server，只能作为
 <details>
 <summary>维护者工作上下文——点击展开</summary>
 
-Host 协议入口是 `src/index.ts`；现有 JavaScript 实现从 `src/plugin.js` 导入，以便错误路径测试继续覆盖生产注册逻辑。`client.js` 仍是 Harness classic-script ModuleLoader factory，并将图片呈现交给官方 conversation gallery。
+Host 入口是 `src/index.ts`。客户端根据成功的工具结果显示图片，并通过标准聊天预览加载已保存的附件。
 
 </details>

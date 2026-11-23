@@ -5,7 +5,7 @@ import {
   ImageIterateError,
   generateAndReview,
   generateImage,
-} from '../src/api.js'
+} from '../src/api.ts'
 
 const IMAGE = Buffer.from('image-bytes').toString('base64')
 
@@ -94,6 +94,35 @@ test('视觉审核失败不将已生成图片标记为未知结果', async () =>
   assert.equal(result.reviewStatus, 'review_unavailable')
   assert.equal(result.attachment.attachmentId, 'sha256:1')
   assert.equal(calls, 2)
+})
+
+test('provider-owned review failure preserves the generated attachment without retrying', async () => {
+  let calls = 0
+  const result = await generateAndReview({
+    maxIterations: 2,
+    image: { generate: async () => {
+      calls++
+      return { bytes: Buffer.from(IMAGE, 'base64'), mimeType: 'image/png' }
+    } },
+    review: { review: async () => {
+      throw Object.assign(new Error('Review rejected by upstream'), { code: 'UPSTREAM_REJECTED' })
+    } },
+  }, { prompt: 'a square', acceptanceCriteria: 'blue' }, { saveImage: saveImage() })
+  assert.equal(calls, 1)
+  assert.equal(result.reviewStatus, 'review_unavailable')
+  assert.equal(result.attachment.attachmentId, 'sha256:1')
+})
+
+test('provider-owned generation with an unknown outcome is not retried', async () => {
+  let calls = 0
+  const cause = Object.assign(new Error('socket closed'), { code: 'UPSTREAM_OUTCOME_UNKNOWN' })
+  await assert.rejects(generateAndReview({
+    maxIterations: 2,
+    image: { generate: async () => { calls++; throw cause } },
+    review: { review: async () => assert.fail('review must not start') },
+  }, { prompt: 'a square', acceptanceCriteria: 'blue' }, { saveImage: saveImage() }),
+  error => error.code === IMAGE_GENERATION_OUTCOME_UNKNOWN && error.cause === cause)
+  assert.equal(calls, 1)
 })
 
 test('视觉审核被调用方取消时向上抛出取消错误', async () => {

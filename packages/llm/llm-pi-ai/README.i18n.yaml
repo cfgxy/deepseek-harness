@@ -21,8 +21,8 @@
   en: f3b761c7c7ecb82f
   zh: e10d999aa348ef86
 /deepseek-ai-dsh-llm-pi-ai/use-this-package/configure-provider-routes:
-  en: 738edb4ae053740d
-  zh: cc6853e2bdac01ec
+  en: 591a19a2956a68de
+  zh: 158c82bc63841adc
 /deepseek-ai-dsh-llm-pi-ai/use-this-package/sign-in-to-a-provider:
   en: c36f66438638ae08
   zh: 066a2fc4cb97c86f
@@ -32,6 +32,9 @@
 /deepseek-ai-dsh-llm-pi-ai/use-this-package/run-with-reasoning-and-wire-compatibility:
   en: b58b917e7f250aee
   zh: aff599081bac08c3
+/deepseek-ai-dsh-llm-pi-ai/use-this-package/provider-owned-image-capability:
+  en: 7aa94d1c3e2cdfc2
+  zh: 50b711c9b8d6b956
 /deepseek-ai-dsh-llm-pi-ai/use-this-package/change-configuration-at-runtime:
   en: 92f554e1718614ca
   zh: f17ed3ad3e5d28e2

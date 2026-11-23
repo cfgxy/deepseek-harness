@@ -145,6 +145,7 @@ const imageResult: readonly AssembledEventRecord[] = [
         turn: 75,
         step: 0,
         meta: {
+          kind: 'image-iterate-result',
           image: attachment,
         },
         message: {
@@ -255,25 +256,8 @@ it('loads a persistent image-review attachment through the installed client bund
   })
   await openFixtureHistory()
 
-  const row = await waitFor(() => {
-    const value = document.querySelector<HTMLElement>('[data-chat-call-id="image-review-call"]')
-    if (value === null) {
-      const calls = [...document.querySelectorAll<HTMLElement>('[data-chat-call-id]')]
-        .map(element => element.getAttribute('data-chat-call-id'))
-      const boot = Reflect.get(window, '__DSH_BOOT__') as { entries?: { id?: string }[] } | undefined
-      const pluginLoaded = boot?.entries?.some(entry => entry.id === '@deepseek-ai/dsh-image-iterate-plugin') === true
-      throw new Error(`image review tool row missing; visible calls=${JSON.stringify(calls)}; plugin entry=${String(pluginLoaded)}`)
-    }
-    return value
-  }, { timeout: 10_000 })
-  const toggle = row.querySelector<HTMLElement>('[data-expandable]')
-  if (toggle !== null) fireEvent.click(toggle)
-
-  const image = await waitFor(() => {
-    const value = row.querySelector<HTMLImageElement>('img[alt="image-review-fixture.png"]')
-    if (value === null) throw new Error('image review attachment missing')
-    return value
-  })
+  const image = await screen.findByRole('img', { name: 'image-review-fixture.png' }, { timeout: 10_000 })
+  expect(image.closest('[data-chat-call-id]')).toBeNull()
   expect(image.getAttribute('src')?.split(':')[0]).toBe('blob')
   await waitFor(() => {
     expect(remote.mock.log.calls('session/attachment').some(isImageReviewAttachmentRead)).toBe(true)

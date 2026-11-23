@@ -4,6 +4,7 @@ import type { ImageAttachmentRef, ImageMediaType } from '@deepseek-ai/dsh-attach
 import { HarnessError } from '@deepseek-ai/dsh-llm'
 import { defineTool } from '@deepseek-ai/dsh-tools'
 import type { ToolResult } from '@deepseek-ai/dsh-tools'
+import type {} from '@deepseek-ai/dsh-system-prompt'
 import {
   IMAGE_GENERATION_OUTCOME_UNKNOWN,
   IMAGE_GENERATION_OUTCOME_UNKNOWN_MESSAGE,
@@ -15,9 +16,7 @@ import {
 import type { Config } from './index.ts'
 import type { GeneratedImage, ImageGenerationConfig, ReviewConfig } from './api.ts'
 import { capabilityConfig, ImageCapabilityError, provideImageCapabilityRegistry, resolveImageCapability } from './capability.ts'
-
-export const name = 'image-iterate-plugin'
-export const inject = ['tools', 'attachments', 'credentials', 'llm', 'userQuestions']
+import type { ImageCapability, ImageReviewCapability } from './capability.ts'
 
 type OutputFormat = 'png' | 'webp' | 'jpeg'
 
@@ -136,13 +135,12 @@ async function resolveCredential(ctx: Context, reference: string, role: string):
   return resolved.value
 }
 
-/** Register a complete configured route without exposing its endpoint or credential to the registry. */
-function registerConfiguredCapability(
+function configuredCapabilities(
   ctx: Context,
   provider: string,
   config: ConfigSnapshot,
   outputFormat: OutputFormat,
-): () => void {
+): { imageOverride?: ImageCapability; reviewOverride?: ImageReviewCapability } {
   const noPersist = async (_image: GeneratedImage, _iteration: number): Promise<never> => {
     throw new ImageIterateError('IMAGE_ITERATE_FAILED', '单次 provider capability 不应直接持久化图像。')
   }
@@ -159,26 +157,32 @@ function registerConfiguredCapability(
     model: config.reviewModel,
     token: await resolveCredential(ctx, config.reviewCredential, '视觉审核'),
   })
-  const registry = ctx.get('imageCapabilities')
-  if (registry === undefined) throw new ImageCapabilityError('CAPABILITY_UNAVAILABLE', '图像 capability registry 尚未提供。')
-  return registry.register({
-    id: `image-iterate-override:${provider}`,
-    provider,
-    model: config.imageModel,
-    label: 'Configured OpenAI-compatible image route',
-    generate: async request => generateImage(await imageConfig(request.size, request.quality), request.prompt, {
-      timeoutMs: config.timeoutMs,
-      fetchImpl: fetch,
-      ...(request.signal === undefined ? {} : { signal: request.signal }),
-      saveImage: noPersist,
-    }),
-    review: async request => reviewImage(await reviewConfig(), request.image, request.acceptanceCriteria, {
-      timeoutMs: config.timeoutMs,
-      fetchImpl: fetch,
-      ...(request.signal === undefined ? {} : { signal: request.signal }),
-      saveImage: noPersist,
-    }),
-  })
+  return {
+    ...config.imageBaseUrl.trim() === '' ? {} : { imageOverride: {
+      id: `image-iterate-override:${provider}`,
+      provider,
+      model: config.imageModel,
+      label: 'Configured OpenAI-compatible image route',
+      generate: async request => generateImage(await imageConfig(request.size, request.quality), request.prompt, {
+        timeoutMs: config.timeoutMs,
+        fetchImpl: fetch,
+        ...(request.signal === undefined ? {} : { signal: request.signal }),
+        saveImage: noPersist,
+      }),
+    } },
+    ...config.reviewBaseUrl.trim() === '' ? {} : { reviewOverride: {
+      id: `image-iterate-review-override:${provider}`,
+      provider,
+      model: config.reviewModel,
+      label: 'Configured OpenAI-compatible review route',
+      review: async request => reviewImage(await reviewConfig(), request.image, request.acceptanceCriteria, {
+        timeoutMs: config.timeoutMs,
+        fetchImpl: fetch,
+        ...(request.signal === undefined ? {} : { signal: request.signal }),
+        saveImage: noPersist,
+      }),
+    } },
+  }
 }
 
 function asHarnessError(error: unknown): HarnessError {
@@ -248,9 +252,16 @@ function imageFromMeta(value: unknown): ImageAttachmentRef | undefined {
 /** Register the image generation and independent visual review tool. */
 export function apply(ctx: Context, config: Config): void {
   provideImageCapabilityRegistry(ctx)
+  ctx.systemPrompt.section({
+    name: 'tool:generate_image_with_review',
+    order: ctx.systemPrompt.getSectionOrder('DELIVERABLE_FILE_REFERENCES') + 1,
+    text: ({ scope, toolSet }) => ctx.tools.definitions(scope, toolSet).some(tool => tool.name === 'generate_image_with_review')
+      ? 'When the user explicitly asks you to create an image, call generate_image_with_review before answering. Derive acceptance criteria from the request. Only report the image as generated after a successful tool result includes a saved image attachment. If review did not pass or was unavailable, say so. Report tool failures and unknown outcomes honestly; do not retry a failed call automatically. The tool handles review and any bounded regeneration itself.'
+      : '',
+  })
   ctx.effect(() => ctx.tools.register(defineTool({
     name: 'generate_image_with_review',
-    description: 'Generate one image through the current chat provider when it exposes a provider-owned image capability, review it against explicit acceptance criteria, and retry only when that review rejects it. Explicit endpoint/model/credential overrides remain available for advanced deployments; ask the user when capability selection is ambiguous. The configured limit prevents unbounded paid requests.',
+    description: 'Use this tool when the user explicitly asks you to create an image. It saves an image attachment and visually reviews it against acceptance criteria. Only say an image was generated when this tool returns a saved attachment. Do not automatically retry a failed or unknown outcome.',
     parameters: {
       prompt: { type: 'string', required: true, description: 'The complete image-generation prompt.' },
       acceptance_criteria: { type: 'string', required: true, description: 'Observable requirements the visual reviewer must check.' },
@@ -260,7 +271,7 @@ export function apply(ctx: Context, config: Config): void {
     output: {
       schema: resultSchema,
       render: (_args: ImageToolArgs, value: ImageToolResult) => [{ type: 'text', text: JSON.stringify(value) }],
-      presentationMeta: (_args: ImageToolArgs, value: ImageToolResult) => ({ image: value.image }),
+      presentationMeta: (_args: ImageToolArgs, value: ImageToolResult) => ({ kind: 'image-iterate-result', image: value.image }),
     },
     presentResult: (_args: ImageToolArgs, result: ToolResult) => {
       const meta = typeof result.meta === 'object' && result.meta !== null ? result.meta as Record<string, unknown> : undefined
@@ -269,7 +280,6 @@ export function apply(ctx: Context, config: Config): void {
       return { card: 'generic', content: [{ type: 'image', attachment: image }] }
     },
     async execute(args: ImageToolArgs, exec): Promise<ImageToolResult> {
-      let configuredDisposer: (() => void) | undefined
       try {
         const runtimeConfig = ensureConfig(config)
         const outputFormat = runtimeConfig.outputFormat as OutputFormat
@@ -278,16 +288,13 @@ export function apply(ctx: Context, config: Config): void {
         const size = args.size ?? runtimeConfig.defaultSize
         const quality = args.quality ?? runtimeConfig.defaultQuality
         let automatic
-        if (imageOverride && reviewOverride && exec.agent !== undefined) {
-          const current = exec.agent.model.current()
-          if (current?.provider !== undefined && current.provider.trim() !== '') {
-            configuredDisposer = registerConfiguredCapability(ctx, current.provider, runtimeConfig, outputFormat)
-            automatic = await resolveImageCapability(ctx, exec.agent, size, quality, exec.signal)
+        if (!imageOverride || !reviewOverride) {
+          if (exec.agent === undefined) {
+            throw new ImageCapabilityError('CAPABILITY_UNAVAILABLE', '当前工具调用没有可用的 agent，无法继承聊天 provider。')
           }
-        } else if (!imageOverride || !reviewOverride) {
-          automatic = exec.agent === undefined
-            ? (() => { throw new ImageCapabilityError('CAPABILITY_UNAVAILABLE', '当前工具调用没有可用的 agent，无法继承聊天 provider。') })()
-            : await resolveImageCapability(ctx, exec.agent, size, quality, exec.signal)
+          const provider = exec.agent.model.current()?.provider ?? ''
+          automatic = await resolveImageCapability(ctx, exec.agent, size, quality, exec.signal,
+            configuredCapabilities(ctx, provider, runtimeConfig, outputFormat))
         }
         const resolvedSize = automatic?.size ?? size
         const resolvedQuality = automatic?.quality ?? quality
@@ -345,8 +352,6 @@ export function apply(ctx: Context, config: Config): void {
         }
       } catch (error) {
         throw asHarnessError(error)
-      } finally {
-        configuredDisposer?.()
       }
     },
   })), 'image-iterate-plugin: image review tool')

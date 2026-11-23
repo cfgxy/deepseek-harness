@@ -1,6 +1,6 @@
 import type { Context } from '@deepseek-ai/cordis'
 import type { Agent } from '@deepseek-ai/dsh-agent'
-import type { LlmModelInfo, LlmResolvedModelInfo } from '@deepseek-ai/dsh-llm'
+import type { LlmModelInfo } from '@deepseek-ai/dsh-llm'
 import type { GeneratedImage, ReviewResult } from './api.ts'
 
 /** Provider-owned image operations. Credentials and endpoints stay inside these closures. */
@@ -43,6 +43,8 @@ export interface ImageReviewCapability {
   model: string
   /** User-facing label that contains no secret material. */
   label: string
+  /** Explicit provider review default when the current model has no review route. */
+  preferred?: boolean
   /** Provider-owned visual review closure. */
   review(request: {
     image: GeneratedImage
@@ -156,7 +158,6 @@ declare module '@deepseek-ai/cordis' {
 export interface ImageCapabilityResolution {
   capability: ImageCapability
   review: ImageReviewCapability
-  model: LlmResolvedModelInfo
   size: string
   quality: string
 }
@@ -243,40 +244,13 @@ async function askForCapability(
   agent: Agent,
   signal: AbortSignal | undefined,
   candidates: readonly ImageCapability[],
-  provider: string,
-  currentModel: string,
 ): Promise<string> {
   return askSelection(ctx, agent, signal, {
     id: 'image-capability',
     header: '图像能力',
-    question: candidates.length === 0
-      ? `当前聊天 provider「${provider}」的模型「${currentModel}」没有声明可用的图像生成能力，请提供已注册的 capability id。`
-      : '请选择用于图像生成和视觉审核的 provider-owned capability。',
-    detail: '插件不会读取或记录 provider 的原始凭据；只有 provider 注册的受控生成和审核操作会被调用。',
-    ...(candidates.length === 0 ? {} : {
-      options: candidates.map(candidate => ({ label: candidate.id, description: candidate.label })),
-    }),
-  })
-}
-
-async function askForReviewCapability(
-  ctx: QuestionContext,
-  agent: Agent,
-  signal: AbortSignal | undefined,
-  candidates: readonly ImageReviewCapability[],
-  provider: string,
-  currentModel: string,
-): Promise<string> {
-  return askSelection(ctx, agent, signal, {
-    id: 'image-review-capability',
-    header: '视觉审核能力',
-    question: candidates.length === 0
-      ? `当前聊天 provider「${provider}」的模型「${currentModel}」没有声明可用的视觉审核能力，请提供已注册的 capability id。`
-      : '请选择用于视觉审核的 provider-owned capability。',
-    detail: '当前模型只有在 provider 明确声明支持 image 输入时才会被优先复用；插件不会读取或记录原始凭据。',
-    ...(candidates.length === 0 ? {} : {
-      options: candidates.map(candidate => ({ label: candidate.id, description: candidate.label })),
-    }),
+    question: '请选择用于图像生成的模型。',
+    detail: '只可选择当前 provider 已注册的生图模型。',
+    options: candidates.map(candidate => ({ label: candidate.id, description: candidate.label })),
   })
 }
 
@@ -308,115 +282,89 @@ async function resolveControl(
   })
 }
 
-async function resolveModel(ctx: Context, provider: string, model: string, signal?: AbortSignal): Promise<LlmResolvedModelInfo> {
-  // 同时读取 provider 目录和精确模型元数据；能力判断不检查模型名称。
-  await ctx.llm.listModels(provider)
-  return ctx.llm.resolveModelInfo(provider, model, signal)
-}
-
-/** Resolve the current chat route to one provider-owned image capability. */
-export async function resolveImageCapability(
-  ctx: Context,
-  agent: Agent,
-  size: string,
-  quality: string,
-  signal?: AbortSignal,
-): Promise<ImageCapabilityResolution> {
-  const current = agent.model.current()
-  if (current === undefined || typeof current.provider !== 'string' || typeof current.model !== 'string'
-    || current.provider.trim() === '' || current.model.trim() === '') {
-    throw new ImageCapabilityError('CAPABILITY_UNAVAILABLE', '当前聊天没有可确定的 provider/model 路由。')
-  }
-
-  let model: LlmResolvedModelInfo
-  try {
-    model = await resolveModel(ctx, current.provider, current.model, signal)
-  } catch (error) {
-    throw new ImageCapabilityError('CAPABILITY_UNAVAILABLE', '无法读取当前聊天模型的能力元数据。', { cause: error })
-  }
-
+function requireRegistry(ctx: Context): ImageCapabilityRegistry {
   const registry = ctx.get('imageCapabilities')
   if (registry === undefined) {
     throw new ImageCapabilityError('CAPABILITY_UNAVAILABLE', '图像 capability registry 尚未提供。')
   }
-  const candidates = [...await registry.list(current.provider)]
-    .filter(candidate => candidate.provider === current.provider)
-  const exact = candidates.filter(candidate => candidate.model === current.model)
-  let selected: ImageCapability | undefined
-  if (exact.length === 1) selected = exact[0]
-  else if (exact.length === 0 && candidates.length === 1) selected = candidates[0]
-  else {
-    const selectedId = await askForCapability(
-      ctx,
-      agent,
-      signal,
-      exact.length > 1 ? exact : candidates,
-      current.provider,
-      current.model,
-    )
-    const selectable = exact.length > 1 ? exact : candidates
-    selected = selectable.find(candidate => candidate.id === selectedId)
+  return registry
+}
+
+async function selectGeneration(
+  ctx: Context,
+  agent: Agent,
+  provider: string,
+  model: string,
+  signal?: AbortSignal,
+): Promise<ImageCapability> {
+  const candidates = (await requireRegistry(ctx).list(provider)).filter(candidate => candidate.provider === provider)
+  const exact = candidates.filter(candidate => candidate.model === model)
+  const selectable = exact.length === 0 ? candidates : exact
+  if (selectable[0] === undefined) {
+    throw new ImageCapabilityError('CAPABILITY_UNAVAILABLE', `当前 provider「${provider}」没有可用的生图模型。请在模型配置中添加受支持的生图模型，或设置生图覆盖。`)
   }
+  if (selectable.length === 1) return selectable[0]
+  const selectedId = await askForCapability(ctx, agent, signal, selectable)
+  const selected = selectable.find(candidate => candidate.id === selectedId)
   if (selected === undefined) {
-    throw new ImageCapabilityError('CAPABILITY_UNAVAILABLE', '问询选择的图像 capability 不存在或不属于当前 provider。')
+    throw new ImageCapabilityError('CAPABILITY_UNAVAILABLE', '所选生图模型不存在或不属于当前 provider。')
   }
-  const reviewCandidates = typeof registry.listReviews === 'function'
-    ? [...await registry.listReviews(current.provider)].filter(candidate => candidate.provider === current.provider)
-    : []
-  const inlineReview = selected.review === undefined ? undefined : {
+  return selected
+}
+
+async function selectReview(
+  ctx: Context,
+  provider: string,
+  model: string,
+  selected: ImageCapability,
+): Promise<ImageReviewCapability> {
+  const candidates = (await requireRegistry(ctx).listReviews(provider)).filter(candidate => candidate.provider === provider)
+  const inline = selected.review === undefined ? undefined : {
     id: selected.id,
     provider: selected.provider,
     model: selected.model,
     label: selected.label,
     review: selected.review,
   }
-  let review: ImageReviewCapability | undefined
-  if (model.inputModalities?.includes('image') === true) {
-    if (inlineReview?.model === current.model) {
-      review = inlineReview
-    } else {
-      const exactReview = reviewCandidates.filter(candidate => candidate.model === current.model)
-      if (exactReview.length === 1) review = exactReview[0]
-      else if (exactReview.length === 0 && reviewCandidates.length === 1) review = reviewCandidates[0]
-      else if (exactReview.length > 1 || reviewCandidates.length > 1) {
-        const selectedId = await askForReviewCapability(
-          ctx,
-          agent,
-          signal,
-          exactReview.length > 1 ? exactReview : reviewCandidates,
-          current.provider,
-          current.model,
-        )
-        const selectable = exactReview.length > 1 ? exactReview : reviewCandidates
-        review = selectable.find(candidate => candidate.id === selectedId)
-      }
-    }
-  } else {
-    review = inlineReview
-    if (review === undefined) {
-      const exactReview = reviewCandidates.filter(candidate => candidate.model === selected.model)
-      if (exactReview.length === 1) review = exactReview[0]
-      else if (exactReview.length === 0 && reviewCandidates.length === 1) review = reviewCandidates[0]
-      else if (exactReview.length > 1 || reviewCandidates.length > 1) {
-        const selectedId = await askForReviewCapability(
-          ctx,
-          agent,
-          signal,
-          exactReview.length > 1 ? exactReview : reviewCandidates,
-          current.provider,
-          selected.model,
-        )
-        const selectable = exactReview.length > 1 ? exactReview : reviewCandidates
-        review = selectable.find(candidate => candidate.id === selectedId)
-      }
-    }
-  }
+  if (inline?.model === model) return inline
+  const review = candidates.find(candidate => candidate.model === model)
+    ?? candidates.find(candidate => candidate.preferred)
+    ?? inline
+    ?? candidates[0]
   if (review === undefined) {
-    throw new ImageCapabilityError('CAPABILITY_UNAVAILABLE', '当前 provider 没有可用的视觉审核 capability。')
+    throw new ImageCapabilityError('CAPABILITY_UNAVAILABLE', `当前 provider「${provider}」没有可用的视觉审核模型。请为视觉模型声明文本和图像输入，或设置视觉审核覆盖。`)
   }
+  return review
+}
+
+/**
+ * Choose generation and review independently. Automatic routes stay on the current provider.
+ * @param ctx - Capability and question services.
+ * @param agent - Agent whose current model determines the provider and preferred reviewer.
+ * @param size - Requested size, or an empty string to ask the user.
+ * @param quality - Requested quality, or an empty string to ask the user.
+ * @param signal - Cancellation signal for user questions, when supplied.
+ * @param options - Optional per-call replacements; each skips resolution of its automatic route.
+ * @returns Both routes and validated controls. Rejects before generation if no route is available.
+ */
+export async function resolveImageCapability(
+  ctx: Context,
+  agent: Agent,
+  size: string,
+  quality: string,
+  signal?: AbortSignal,
+  options: { imageOverride?: ImageCapability; reviewOverride?: ImageReviewCapability } = {},
+): Promise<ImageCapabilityResolution> {
+  const current = agent.model.current()
+  if (current === undefined || typeof current.provider !== 'string' || typeof current.model !== 'string'
+    || current.provider.trim() === '' || current.model.trim() === '') {
+    throw new ImageCapabilityError('CAPABILITY_UNAVAILABLE', '当前聊天没有可确定的 provider/model 路由。')
+  }
+  const selected = options.imageOverride ?? await selectGeneration(ctx, agent, current.provider, current.model, signal)
+  const review = options.reviewOverride ?? await selectReview(ctx, current.provider, current.model, selected)
   const resolvedSize = await resolveControl(ctx, agent, signal, selected, 'size', size)
   const resolvedQuality = await resolveControl(ctx, agent, signal, selected, 'quality', quality)
-  return { capability: selected, review, model, size: resolvedSize, quality: resolvedQuality }
+  return { capability: selected, review, size: resolvedSize, quality: resolvedQuality }
 }
 
 /** Keep the selected capability opaque to the API consumer while adapting its closures. */

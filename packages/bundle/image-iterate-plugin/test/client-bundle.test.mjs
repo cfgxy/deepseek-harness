@@ -52,9 +52,10 @@ test('客户端产物以 Harness classic-script 工厂注册', async () => {
     if (specifier === '@deepseek-ai/dsh-client-ui-primitives') return clientUiPrimitives
     throw new Error(`unexpected client dependency: ${specifier}`)
   })
-  assert.deepEqual([...client.inject], ['slots', 'locale', 'remote', 'remote.credentials', 'configForms'])
+  assert.deepEqual([...client.inject], ['slots', 'locale', 'remote', 'remote.credentials', 'configForms', 'uiConversation'])
 
   const registrations = []
+  const definitions = []
   const injections = []
   const scope = {
     getSnapshot() {
@@ -80,6 +81,7 @@ test('客户端产物以 Harness classic-script 工厂注册', async () => {
       get() { return scope },
       whileServed(_names, register) { return register() },
     },
+    uiConversation: { events: { register(definition) { definitions.push(definition) } } },
     slots: {
       inject(name, callback) {
         injections.push(name)
@@ -91,7 +93,7 @@ test('客户端产物以 Harness classic-script 工厂注册', async () => {
     },
   }
   client.apply(ctx)
-  assert.deepEqual(injections, ['plugins.item', 'tool.call.toolview'])
+  assert.deepEqual(injections, ['plugins.item', 'conversation.chat.node', 'tool.call.toolview'])
   const toolRegistration = registrations.find(({ definition }) => definition.name === 'tool.call.toolview')
   assert.notEqual(toolRegistration, undefined)
   assert.equal(toolRegistration.definition.key, 'generate_image_with_review')
@@ -103,6 +105,26 @@ test('客户端产物以 Harness classic-script 工厂注册', async () => {
     attachmentId: 'sha256:image', mediaType: 'image/png', bytes: 12, width: 3, height: 4, name: 'image.png',
     originalDimensions: { width: 6, height: 8 },
   }
+  const definition = definitions.find(item => item.kind === 'generated-image')
+  const event = {
+    type: 'tool/result', surfaceOp: 'append', seq: 12,
+    data: { message: { isError: false, source: { callId: 'call-image' } }, meta: { kind: 'image-iterate-result', image: attachment } },
+  }
+  assert.equal(definition.match(event).id, 'call-image')
+  assert.equal(definition.match({ ...event, data: { ...event.data, message: { ...event.data.message, isError: true } } }), null)
+  const start = { event, location: { kind: 'step' } }
+  const node = definition.buildViewNode({ start, key: 'image', id: 'call-image', state: definition.start({}, start) })
+  assert.equal(node.visibility, 'visible')
+  assert.equal(node.groupTree, 'turn')
+  const renderer = registrations.find(item => item.definition.key === 'generated-image')
+  const display = renderer.component({
+    node, loadImage: 'session-image-loader',
+    renderFactorySlot: (name, owner) => ({ name, owner }),
+  })
+  assert.equal(display.name, 'conversation.images.content')
+  assert.equal(display.owner.loadImage, 'session-image-loader')
+  assert.equal(display.owner.images[0].attachment.attachmentId, attachment.attachmentId)
+
   toolRegistration.component({
     phase: 'result',
     block: { isError: false, meta: { image: attachment }, content: [{ type: 'text', text: 'complete' }] },

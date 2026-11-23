@@ -3,7 +3,8 @@ import type { Context } from '@deepseek-ai/cordis'
 import type {} from '@deepseek-ai/dsh-api-remotes/client'
 import type { ImageAttachmentRef, ImageMediaType } from '@deepseek-ai/dsh-attachment'
 import type {} from '@deepseek-ai/dsh-client-locale/client'
-import type { MessageImageLoader } from '@deepseek-ai/dsh-client-ui-conversation/client'
+import type { ChatNode, ChatNodeViewProps } from '@deepseek-ai/dsh-client-ui-chat/client'
+import type { ConversationNodeDefinition, MessageImageLoader } from '@deepseek-ai/dsh-client-ui-conversation/client'
 import type {} from '@deepseek-ai/dsh-client-ui-plugin-manager/client'
 import type {} from '@deepseek-ai/dsh-client-ui-renderer/client'
 import type {} from '@deepseek-ai/dsh-client-ui-settings/client'
@@ -81,6 +82,40 @@ function ImageResultRow(props: ImageToolViewProps): ReactNode {
   return children.length === 0 ? null : h('div', null, ...children)
 }
 
+declare module '@deepseek-ai/dsh-client-ui-chat/client' {
+  interface ChatNodeDataMap {
+    /** Saved image delivered by the image generation tool. */
+    'generated-image': ImageAttachmentRef
+  }
+}
+
+const generatedImageDefinition: ConversationNodeDefinition<ImageAttachmentRef | undefined> = {
+  kind: 'generated-image',
+  target: 'chat',
+  match: (event) => {
+    if (event.type !== 'tool/result' || event.surfaceOp !== 'append' || event.data.message.isError
+      || record(event.data.meta)?.kind !== 'image-iterate-result' || attachmentFrom(event.data.meta) === undefined) return null
+    return { id: String(event.data.message.source.callId), role: 'start' }
+  },
+  start: (_context, { event }) => event.type === 'tool/result' ? attachmentFrom(event.data.meta) : undefined,
+  update: ({ state }) => state,
+  buildViewNode: ({ start, key, id, state: data }) => {
+    if (start === undefined || data === undefined) return null
+    return {
+      key, id, kind: 'generated-image', target: 'chat', anchorSeq: start.event.seq,
+      location: start.location, groupTree: 'turn', visibility: 'visible', data,
+    } satisfies ChatNode<'generated-image'>
+  },
+}
+
+function GeneratedImage({ node, loadImage, renderFactorySlot }: Pick<
+  ChatNodeViewProps<'generated-image'>, 'node' | 'loadImage' | 'renderFactorySlot'
+>): ReactNode {
+  return renderFactorySlot('conversation.images.content', {
+    images: [{ attachment: node.data }], loadImage, align: 'start',
+  })
+}
+
 declare module '@deepseek-ai/dsh-client-ui-slots' {
   interface LocaleNamespaceMap {
     /** Image generation and review settings copy. */
@@ -92,7 +127,7 @@ declare module '@deepseek-ai/dsh-client-ui-slots' {
 export const NS = 'settings.imageIterate'
 
 /** Client services required by the settings page and tool result view. */
-export const inject = ['slots', 'locale', 'remote', 'remote.credentials', 'configForms']
+export const inject = ['slots', 'locale', 'remote', 'remote.credentials', 'configForms', 'uiConversation']
 
 /** Register the image settings page and the persisted image result view. */
 export function apply(ctx: Context): void {
@@ -107,6 +142,10 @@ export function apply(ctx: Context): void {
   ctx.effect(() => ctx.configForms.whileServed([IMAGE_ITERATE_NS], () => ctx.slots.inject('plugins.item', () => ctx.slots.register({
     name: 'plugins.item', id: 'image-iterate-plugin', order: 30, label: () => t('title'), locale: NS, inject: () => card.inject(),
   }, SettingsCard))), 'image-iterate-plugin: page')
+  ctx.uiConversation.events.register(generatedImageDefinition)
+  ctx.slots.inject('conversation.chat.node', () => ctx.slots.register({
+    name: 'conversation.chat.node', key: 'generated-image',
+  }, GeneratedImage))
   ctx.effect(() => ctx.slots.inject('tool.call.toolview', () => ctx.slots.register({
     name: 'tool.call.toolview', key: 'generate_image_with_review',
   }, ImageResultRow)), 'image-iterate-plugin: tool row')

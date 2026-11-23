@@ -1,8 +1,8 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
 import { Context } from '@deepseek-ai/cordis'
-import { apply } from '../src/plugin.js'
-import { provideImageCapabilityRegistry } from '../src/capability.js'
+import { apply } from '../src/plugin.ts'
+import { provideImageCapabilityRegistry } from '../src/capability.ts'
 
 function config() {
   const volatile = value => ({ get: () => value })
@@ -28,6 +28,7 @@ test('Cordis composition 使用当前 provider 路由并优先当前模型视觉
   const calls = []
   let definition
 
+  ctx.provide('systemPrompt', { section() {}, getSectionOrder: () => 0 })
   ctx.provide('tools', {
     register(value) {
       definition = value

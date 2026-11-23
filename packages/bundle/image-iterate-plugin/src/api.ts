@@ -215,8 +215,9 @@ export async function generateImage(
     const first = Array.isArray(data) ? record(data[0]) : undefined
     return { bytes: decodeImage(first?.b64_json), mimeType: `image/${config.outputFormat}` as ImageMediaType }
   } catch (error) {
+    if (record(error)?.code === IMAGE_GENERATION_OUTCOME_UNKNOWN) throw error
     if (error instanceof ImageIterateError
-      && ['CANCELLED', 'INVALID_CONFIG', 'IMAGE_GENERATION_OUTCOME_UNKNOWN', 'UPSTREAM_REJECTED'].includes(error.code)) {
+      && ['CANCELLED', 'INVALID_CONFIG', 'UPSTREAM_REJECTED'].includes(error.code)) {
       throw error
     }
     throw imageOutcomeUnknown(options, error)
@@ -262,12 +263,13 @@ function revisionPrompt(prompt: string, feedback: string): string {
   return `${prompt}\n\n请根据以下审核反馈修改：${feedback}`
 }
 
-function isReviewUnavailable(error: ImageIterateError): boolean {
-  return error.code === 'INVALID_REVIEW_RESPONSE'
-    || error.code === 'INVALID_UPSTREAM_RESPONSE'
-    || error.code === 'UPSTREAM_OUTCOME_UNKNOWN'
-    || error.code === 'UPSTREAM_REJECTED'
-    || error.code === 'UPSTREAM_UNREACHABLE'
+function isReviewUnavailable(error: unknown): error is Error {
+  const code = record(error)?.code
+  return error instanceof Error && (code === 'INVALID_REVIEW_RESPONSE'
+    || code === 'INVALID_UPSTREAM_RESPONSE'
+    || code === 'UPSTREAM_OUTCOME_UNKNOWN'
+    || code === 'UPSTREAM_REJECTED'
+    || code === 'UPSTREAM_UNREACHABLE')
 }
 
 /** Generate, persist, review, and revise within the configured paid-request limit. */
@@ -280,10 +282,18 @@ export async function generateAndReview(
   request: GenerateAndReviewRequest,
   options: ImageIterateOptions,
 ): Promise<GenerateAndReviewResult> {
-  const generate = (prompt: string): Promise<GeneratedImage> =>
-    'generate' in config.image
-      ? config.image.generate(prompt, options.signal)
-      : generateImage(config.image, prompt, options)
+  const generate = async (prompt: string): Promise<GeneratedImage> => {
+    if (!('generate' in config.image)) return generateImage(config.image, prompt, options)
+    try {
+      return await config.image.generate(prompt, options.signal)
+    } catch (error) {
+      const code = record(error)?.code
+      if (code === 'UPSTREAM_OUTCOME_UNKNOWN' || code === 'INVALID_UPSTREAM_RESPONSE') {
+        throw imageOutcomeUnknown(options, error)
+      }
+      throw error
+    }
+  }
   const reviewCandidate = (image: GeneratedImage): Promise<ReviewResult> =>
     'review' in config.review
       ? config.review.review(image, request.acceptanceCriteria, options.signal)
@@ -307,7 +317,7 @@ export async function generateAndReview(
     try {
       review = await reviewCandidate(image)
     } catch (error) {
-      if (error instanceof ImageIterateError && isReviewUnavailable(error)) {
+      if (isReviewUnavailable(error)) {
         const attachment = await persist(image, iteration)
         return { attachment, iteration, accepted: false, reviewStatus: 'review_unavailable', feedback: error.message }
       }

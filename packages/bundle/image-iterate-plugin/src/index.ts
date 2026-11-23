@@ -17,7 +17,7 @@ export { ImageCapabilityRegistryService, provideImageCapabilityRegistry } from '
 export const name = 'image-iterate-plugin'
 
 /** Services used by the image tool implementation. */
-export const inject = ['tools', 'attachments', 'credentials', 'llm', 'userQuestions']
+export const inject = ['tools', 'attachments', 'credentials', 'llm', 'userQuestions', 'systemPrompt']
 
 /** Configuration for automatic provider-owned image capability selection and optional advanced overrides. */
 export interface Config {

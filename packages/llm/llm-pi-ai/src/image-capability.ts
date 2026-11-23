@@ -29,6 +29,7 @@ interface ImageReviewCapability {
   provider: string
   model: string
   label: string
+  preferred?: boolean
   review(request: {
     image: GeneratedImage
     acceptanceCriteria: string
@@ -145,8 +146,17 @@ function imageBaseURL(profile: ResolvedPiAiProviderProfile): string | undefined 
   return profile.piProvider?.baseUrl
 }
 
-function imageModels(profile: ResolvedPiAiProviderProfile): readonly { id: string; input: readonly string[] }[] {
-  return profile.piProvider?.getModels().map(model => ({ id: model.id, input: model.input })) ?? []
+// Exact IDs for the Images API contract used by this adapter, in default order.
+const OPENAI_IMAGES_MODEL_IDS = [
+  'gpt-image-2',
+  'gpt-image-2.6-flare',
+  'gpt-image-2.6-sunburst',
+  'gpt-image-2.5-flare',
+  'gpt-image-2.5-sunburst',
+] as const
+
+function isKnownImageModel(model: string): boolean {
+  return OPENAI_IMAGES_MODEL_IDS.some(id => id === model)
 }
 
 function generationCapability(
@@ -187,16 +197,18 @@ function reviewCapability(
   model: string,
   baseURL: string,
   resolveApiKey: (provider: string, profile: ResolvedPiAiProviderProfile) => Promise<string | undefined>,
+  preferred: boolean,
 ): ImageReviewCapability {
   return {
     id: `llm-pi-ai:review:${provider}:${model}`,
     provider,
     model,
     label: `${profile.displayName} visual review`,
+    ...preferred ? { preferred: true } : {},
     review: async (request) => {
       const payload = await postJson(ctx, { ...profile, baseURL }, provider, model, 'image-review', 'chat/completions', {
         model,
-        temperature: 0,
+        ...profile.image === undefined ? {} : { temperature: 0 },
         response_format: { type: 'json_object' },
         messages: [
           {
@@ -252,18 +264,27 @@ function imageCapabilityRegistrations(
 ): CapabilityRegistration[] {
   const registrations: CapabilityRegistration[] = []
   for (const [provider, profile] of profiles) {
-    const image = profile.image
     const baseURL = imageBaseURL(profile)
-    if (image === undefined || baseURL === undefined) continue
-    const generation = generationCapability(ctx, provider, profile, image, baseURL, resolveApiKey)
-    registrations.push(() => ctx.imageCapabilities.register(generation))
-    const reviewModels = new Set<string>()
-    if (image.reviewModel !== undefined) reviewModels.add(image.reviewModel)
-    for (const model of imageModels(profile)) {
-      if (model.input.includes('image')) reviewModels.add(model.id)
+    if (baseURL === undefined) continue
+    const models = profile.piProvider?.getModels() ?? []
+    const configuredImage = profile.image
+    const discoveredImage = configuredImage === undefined
+      ? OPENAI_IMAGES_MODEL_IDS.find(id => models.some(model => model.id === id && model.api === 'openai-completions'))
+      : undefined
+    const image = configuredImage ?? (discoveredImage === undefined ? undefined : { model: discoveredImage })
+    if (image !== undefined) {
+      const generation = generationCapability(ctx, provider, profile, image, baseURL, resolveApiKey)
+      registrations.push(() => ctx.imageCapabilities.register(generation))
     }
-    for (const model of reviewModels) {
-      const review = reviewCapability(ctx, provider, profile, model, baseURL, resolveApiKey)
+    const explicitReview = configuredImage?.reviewModel
+    if (explicitReview !== undefined) {
+      const review = reviewCapability(ctx, provider, profile, explicitReview, baseURL, resolveApiKey, true)
+      registrations.push(() => ctx.imageCapabilities.registerReview(review))
+    }
+    for (const model of models) {
+      if (model.id === explicitReview || isKnownImageModel(model.id) || !model.input.includes('image')) continue
+      if (configuredImage === undefined && (model.api !== 'openai-completions' || !model.input.includes('text'))) continue
+      const review = reviewCapability(ctx, provider, profile, model.id, baseURL, resolveApiKey, false)
       registrations.push(() => ctx.imageCapabilities.registerReview(review))
     }
   }

@@ -9,7 +9,7 @@ English | [中文](README.zh.md)
 
 ## Summary
 
-This bundle adds a built-in `generate_image_with_review` tool to the Web/Desktop composition. It first reads the current chat provider/model and consumes provider-owned image-generation and visual-review closures; it regenerates only when review rejects the image within the configured limit. When capability metadata is missing or selection is ambiguous, the tool asks the user through `ctx.userQuestions.ask` instead of guessing from a model name. The package is registered by the shipped Web bundle, so users do not install it with `dsh plugin add`.
+This bundle adds a built-in `generate_image_with_review` tool to the Web/Desktop composition. It first reads the current chat provider/model and consumes provider-owned image-generation and visual-review closures; it regenerates only when review rejects the image within the configured limit. If either route is missing, the tool reports it before generation. If a provider offers multiple equally ranked generation routes, the tool asks the user to choose. The package is registered by the shipped Web bundle, so users do not install it with `dsh plugin add`.
 
 ## Table of Contents
 
@@ -27,7 +27,7 @@ This bundle adds a built-in `generate_image_with_review` tool to the Web/Desktop
 <a id="use-this-package"></a>
 ## Use this package
 
-The Web/Desktop shipped bundle always includes the plugin row. Configure the existing `image-iterate-plugin` row in the target profile's `cordis.patch.yml`; do not add a second plugin row or copy a secret into the patch.
+Ask for an image in a Web or Desktop conversation. Leave the plugin settings blank to reuse available generation and vision models on the current provider. The saved image appears directly in chat.
 
 <a id="configuration"></a>
 ## Configuration
@@ -51,7 +51,7 @@ The default built-in row contains no endpoint, model, or credential values. An u
     outputFormat: png
 ```
 
-In explicit override mode, image and review credentials are resolved on every tool call, so credential rotation does not require a process restart. Keep the two references independent when image generation and visual review should have different access or audit scopes. When both override groups and an agent provider route are available, the plugin registers a temporary provider-owned capability whose closures resolve those credentials and removes it in `finally`; a call without an agent retains the explicit direct fallback. In automatic mode, the provider owns the endpoint and credential while the plugin receives only controlled closures.
+Each complete override replaces only its role for the current call. The other role still uses the current provider when its override is blank. Override credentials are resolved at execution time; the current provider owns credentials and endpoint selection for automatic routes.
 
 <a id="provider-capability-registration"></a>
 ## Provider capability registration
@@ -96,7 +96,7 @@ The plugin reads the current chat provider/model from the agent route. It auto-s
 The pure HTTP and bounded-iteration tests run with provider mocks:
 
 ```sh
-node --test packages/bundle/image-iterate-plugin/test/*.test.mjs
+pnpm --filter @deepseek-ai/dsh-image-iterate-plugin test
 ```
 
 The shipped Web composition tests load the actual Web bundle, ModuleLoader/profile registration, provider-owned capability route, attachment loader, and official gallery path:
@@ -129,7 +129,7 @@ The tool schema is stable for a fixed profile and plugin version. The result tex
 
 <a id="known-limitations-and-deferred-work"></a>
 
-- **The shipped Web/Desktop profile does not provide an image route by itself** — automatic inheritance works only when another provider plugin registers a capability; otherwise configure both override groups with an authorized compatible endpoint, model, and credential reference.
+- **The current provider must have compatible generation and vision models.** See [the pi-ai adapter](../../llm/llm-pi-ai/README.md) for the models it recognizes automatically. A missing route is reported before any image request.
 - **Real provider compatibility is not established by local tests** — providers must be checked separately for endpoint behavior, model availability, credential permission, quota, and response fields.
 - **Review is only as precise as the configured vision model** — the plugin enforces the returned JSON and iteration ceiling, but it cannot guarantee that subjective acceptance criteria are judged correctly.
 - **The built-in row has no interactive credential editor** — profile patching or the DSH credential service remains the configuration path.
@@ -140,6 +140,6 @@ The tool schema is stable for a fixed profile and plugin version. The result tex
 <details>
 <summary>Working context for maintainers — click to expand</summary>
 
-The Host protocol surface is `src/index.ts`; the existing JavaScript implementation is imported from `src/plugin.js` so its error-path tests continue to exercise the production registration logic. `client.js` remains a Harness classic-script ModuleLoader factory and delegates image rendering to the official conversation gallery.
+The Host entry is `src/index.ts`. The client derives the inline image from a successful tool result and uses the standard conversation gallery to load the saved attachment.
 
 </details>

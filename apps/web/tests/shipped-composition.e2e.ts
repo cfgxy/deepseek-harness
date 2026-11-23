@@ -39,9 +39,11 @@ const HEADLESS_PATCH_PATH = join(REPO_ROOT, 'packages/bundle/headless/cordis.pat
 const AUTO_PROVIDER = 'shipped-auto-review-test'
 const AUTO_MODEL = 'same-route'
 const AUTO_CALL_ID = ToolCallId('shipped-auto-review-denied-delete')
-const IMAGE_PROVIDER_FIXTURE = fileURLToPath(new URL('./fixtures/plugins/fixture-image-provider', import.meta.url))
-const IMAGE_PROVIDER = 'deepseek-official'
-const IMAGE_MODEL = 'deepseek-v4-flash'
+const IMAGE_PROVIDER = 'cpa-fixture'
+const IMAGE_MODEL = 'gpt-image-2'
+const IMAGE_CHAT_MODEL = 'gpt-5.6-sol'
+const IMAGE_REVIEW_MODEL = 'gpt-6.2-sol'
+const IMAGE_REQUEST = '生成一只可爱的小猫'
 const IMAGE_BYTES = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII='
 const AUTO_RAW_REASON = `  direct user authorized inspection only\nTEST_ONLY_SECRET_${'x'.repeat(16_384)}  `
 const AUTO_FINAL_TEXT = 'SHIPPED_AUTO_REVIEW_REJECTION_OBSERVED'
@@ -675,8 +677,9 @@ it('ships PTC with run_code but without the general workflow SDK binding', async
   }
 }, 120_000)
 
-it('routes a shipped Loader/profile provider capability through image generation, review, and attachment persistence', async () => {
+it('generates, reviews, and saves an image from a normal chat prompt without plugin settings', async () => {
   const requests: Array<{ path: string; authorization: string | null; body: Record<string, unknown> }> = []
+  let reviews = 0
   const server = createServer((request, response) => {
     void (async () => {
       const chunks: Buffer[] = []
@@ -692,8 +695,24 @@ it('routes a shipped Loader/profile provider capability through image generation
         response.end(JSON.stringify({ data: [{ b64_json: IMAGE_BYTES }] }))
         return
       }
-      if (request.url === '/chat/completions') {
-        response.end(JSON.stringify({ choices: [{ message: { content: JSON.stringify({ accepted: true, feedback: 'fixture accepted' }) } }] }))
+      if (request.url === '/chat/completions' && body.model === IMAGE_REVIEW_MODEL) {
+        const accepted = ++reviews === 2
+        response.end(JSON.stringify({ choices: [{ message: { content: JSON.stringify({ accepted, feedback: 'fixture review feedback' }) } }] }))
+        return
+      }
+      if (request.url === '/chat/completions' && body.model === IMAGE_CHAT_MODEL && body.stream === true) {
+        const hasToolResult = JSON.stringify(body.messages).includes('"role":"tool"')
+        const delta = hasToolResult ? { content: '图片已生成。' } : {
+          tool_calls: [{ index: 0, id: 'call_kitten', type: 'function', function: {
+            name: 'generate_image_with_review',
+            arguments: JSON.stringify({ prompt: IMAGE_REQUEST, acceptance_criteria: 'a cute kitten' }),
+          } }],
+        }
+        response.setHeader('content-type', 'text/event-stream')
+        response.end([
+          { choices: [{ index: 0, delta: { role: 'assistant', ...delta }, finish_reason: null }] },
+          { choices: [{ index: 0, delta: {}, finish_reason: hasToolResult ? 'stop' : 'tool_calls' }], usage: { prompt_tokens: 40, completion_tokens: 8 } },
+        ].map(chunk => `data: ${JSON.stringify(chunk)}\n\n`).join('') + 'data: [DONE]\n\n')
         return
       }
       response.statusCode = 404
@@ -709,81 +728,62 @@ it('routes a shipped Loader/profile provider capability through image generation
   })
   const address = server.address()
   if (address === null || typeof address === 'string') throw new Error('image fixture server did not expose an address')
-  const imagePluginDir = fileURLToPath(new URL('../../../packages/bundle/image-iterate-plugin', import.meta.url))
-  const previousEndpoint = process.env.DSH_IMAGE_FIXTURE_BASE_URL
-  process.env.DSH_IMAGE_FIXTURE_BASE_URL = `http://127.0.0.1:${String(address.port)}/`
+  const oldKey = process.env.DSH_IMAGE_FIXTURE_KEY
+  process.env.DSH_IMAGE_FIXTURE_KEY = 'fixture-token'
   try {
-    scaffold = await launchWebScaffold({
-      deepSeekMissingCredential: true,
-      profile: {
-        packages: [
-          { dir: imagePluginDir, enabled: false },
-          { dir: IMAGE_PROVIDER_FIXTURE, enabled: true },
-        ],
-      },
-    })
+    scaffold = await launchWebScaffold({ deepSeekMissingCredential: true })
     const ctx = scaffold.ctx
-    const registry = ctx.get('imageCapabilities') as { list(provider: string): readonly { id: string }[] }
-    expect(registry.list(IMAGE_PROVIDER).map(capability => capability.id)).toEqual(['fixture-image-route'])
-    const providerEntry = [...ctx.loader.entries()].find(entry => entry.options.id === 'fixture-image-provider')
-    if (providerEntry === undefined) throw new Error('shipped image provider Loader entry is missing')
-
-    const handle = await ctx.agents.create({
-      sessionId: SessionId('shipped-image-composition'),
-      meta: { cwd: scaffold.workspaceCwd },
-      agentOptions: { provider: IMAGE_PROVIDER, model: IMAGE_MODEL },
-      setup: agentCtx => ctx.agentPresets.mount(agentCtx).then(() => undefined),
-    })
+    await ctx.settings.update('llm-pi-ai', { providers: { [IMAGE_PROVIDER]: {
+      api: 'openai-completions',
+      baseURL: `http://127.0.0.1:${String(address.port)}`,
+      apiKeyEnv: 'DSH_IMAGE_FIXTURE_KEY',
+      models: [
+        { id: IMAGE_CHAT_MODEL },
+        { id: 'gpt-image-2.6-flare' },
+        { id: IMAGE_MODEL },
+        { id: IMAGE_REVIEW_MODEL, input: ['text', 'image'] },
+      ],
+    } } })
+    const created = await remote<{ sessionId: string }>(scaffold, 'session/create', { request: { cwd: scaffold.workspaceCwd } })
+    const id = SessionId(created.sessionId)
+    await remote(scaffold, 'session/selectModel', { request: { sessionId: id, provider: IMAGE_PROVIDER, model: IMAGE_CHAT_MODEL } })
     try {
-      const result = await executeToolFixture(ctx, {
-        signal: new AbortController().signal,
-        callId: ToolCallId('shipped-image-generation'),
-        name: 'generate_image_with_review',
-        arguments: { prompt: 'a blue square', acceptance_criteria: 'must be blue' },
-        agent: handle.agent,
-      })
-      expect(result.isError).toBe(false)
-      const output = JSON.parse(result.content.find(block => block.type === 'text')?.text ?? '') as {
-        image: { attachmentId: string; bytes: number; width: number; height: number; mediaType: ImageMediaType }
-        accepted: boolean
-        iteration: number
-      }
-      expect(output).toMatchObject({
-        accepted: true,
-        iteration: 1,
-        image: { width: 1, height: 1, mediaType: 'image/webp' },
-      })
-      expect(output.image.bytes).toBeGreaterThan(0)
-      expect(output.image.attachmentId).toMatch(/^sha256:/u)
-      expect(result.meta).toMatchObject({ image: output.image })
-      const stored = await ctx.attachments.readImage({
-        ...output.image,
-        attachmentId: AttachmentId(output.image.attachmentId),
-      })
-      expect(stored.ref).toMatchObject(output.image)
-      expect(stored.data.byteLength).toBe(output.image.bytes)
-    } finally {
-      await handle.dispose()
+      await promptSession(scaffold, id, IMAGE_REQUEST)
+    } catch (error) {
+      const trace = ctx.sessions.get(id)?.snapshotEvents().map(event => event.type)
+      const upstream = requests.map(({ path, body }) => ({ path, model: body.model, stream: body.stream }))
+      throw new Error(`Image prompt did not settle: ${JSON.stringify({ trace, upstream })}`, { cause: error })
     }
+    const events = await readPersistedEvents(scaffold, id)
+    const call = events.find(event => event.type === 'tool/call' && event.data.name === 'generate_image_with_review')
+    if (call?.type !== 'tool/call') throw new Error('image tool was not called')
+    const result = events.find(event => event.type === 'tool/result' && event.data.message.toolCallId === call.data.callId)
+    if (result?.type !== 'tool/result') throw new Error('image tool did not settle')
+    expect(result.data.message.isError).toBe(false)
+    const output = JSON.parse(result.data.message.content.find(block => block.type === 'text')?.text ?? '') as {
+      image: { attachmentId: string; bytes: number; width: number; height: number; mediaType: ImageMediaType }
+    }
+    expect(output).toMatchObject({ accepted: true, iteration: 2, image: { width: 1, height: 1, mediaType: 'image/webp' } })
+    expect(result.data.meta).toMatchObject({ kind: 'image-iterate-result', image: output.image })
+    const stored = await ctx.attachments.readImage({ ...output.image, attachmentId: AttachmentId(output.image.attachmentId) })
+    expect(stored.data.byteLength).toBe(output.image.bytes)
 
-    expect(requests.map(request => request.path)).toEqual(['/images/generations', '/chat/completions'])
-    expect(requests.every(request => request.authorization === 'Bearer fixture-token')).toBe(true)
-    expect(requests[0]?.body).toMatchObject({
-      model: IMAGE_MODEL,
-      prompt: 'a blue square',
-      n: 1,
-      size: '1024x1024',
-      quality: 'medium',
-      output_format: 'png',
-    })
-    expect(requests[1]?.body).toMatchObject({ model: 'fixture-vision', temperature: 0 })
-
-    await providerEntry.update({ disabled: true })
-    await ctx.loader.await()
-    expect(registry.list(IMAGE_PROVIDER)).toEqual([])
+    const imageRequests = requests.filter(request => request.body.model !== IMAGE_CHAT_MODEL)
+    expect(imageRequests.map(({ path, body }) => [path, body.model])).toEqual([
+      ['/images/generations', IMAGE_MODEL], ['/chat/completions', IMAGE_REVIEW_MODEL],
+      ['/images/generations', IMAGE_MODEL], ['/chat/completions', IMAGE_REVIEW_MODEL],
+    ])
+    expect(imageRequests.every(request => request.authorization === 'Bearer fixture-token')).toBe(true)
+    expect(imageRequests[2]?.body.prompt).toContain('fixture review feedback')
+    const firstChat = requests.find(request => request.body.model === IMAGE_CHAT_MODEL
+      && JSON.stringify(request.body.messages).includes(IMAGE_REQUEST))
+    expect(JSON.stringify(firstChat?.body.messages)).toContain('Only report the image as generated after a successful tool result includes a saved image attachment')
+    expect(firstChat?.body.tools).toContainEqual(expect.objectContaining({
+      function: expect.objectContaining({ name: 'generate_image_with_review' }),
+    }))
   } finally {
-    if (previousEndpoint === undefined) Reflect.deleteProperty(process.env, 'DSH_IMAGE_FIXTURE_BASE_URL')
-    else process.env.DSH_IMAGE_FIXTURE_BASE_URL = previousEndpoint
+    if (oldKey === undefined) Reflect.deleteProperty(process.env, 'DSH_IMAGE_FIXTURE_KEY')
+    else process.env.DSH_IMAGE_FIXTURE_KEY = oldKey
     await new Promise<void>((resolve, reject) => server.close(error => error === undefined ? resolve() : reject(error)))
   }
 }, 120_000)
