@@ -68,6 +68,7 @@
   },
   "scripts": {
     "test": "node --test test/*.test.mjs",
+    "test:fixtures": "pnpm -C ../../.. exec vitest run packages/bundle/data-sources/tests/fixtures.integration.spec.ts",
     "test:composition": "pnpm -C ../../.. exec vitest run --config vitest.web.config.ts apps/web/tests/data-sources-client.e2e.ts"
   }
 }
