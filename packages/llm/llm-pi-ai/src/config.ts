@@ -326,6 +326,7 @@ const modelFields = {
   // `{}`, and absent must stay distinguishable — it means "inherit the
   // installed catalog's capability", while `false` disables reasoning.
   reasoningEfforts: z.union([z.const(false), reasoningEfforts]),
+  metadataSource: z.union(['pi-ai-catalog', 'panuoyun-catalog']),
   compat: compatProfile,
 }
 

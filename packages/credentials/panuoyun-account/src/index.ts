@@ -2,6 +2,7 @@
 import type { Context, Volatile } from '@deepseek-ai/cordis'
 import z from '@deepseek-ai/schemastery'
 import { credentialRef } from '@deepseek-ai/dsh-credentials'
+import { resolveModelMetadata } from '@deepseek-ai/dsh-llm-pi-ai'
 import type { SettingsDescriptor, SettingsPathOp } from '@deepseek-ai/dsh-settings'
 import { Remote, TypertRemoteService } from '@deepseek-ai/dsh-typert-protocol'
 import type { PanuoyunGroup, PanuoyunModel } from './types.ts'
@@ -120,7 +121,7 @@ export class PanuoyunAccount extends TypertRemoteService {
     return await this.selectApiKey(key)
   }
 
-  /** Discover models through the selected API key; a rejected key is removed locally. */
+  /** Discover models through the selected API key; failures preserve the last known-good key and route. */
   @Remote
   async models(): Promise<readonly PanuoyunModel[]> {
     const selected = await this.ctx.credentials.resolve(PANUOYUN_API_KEY_REF)
@@ -200,7 +201,6 @@ export class PanuoyunAccount extends TypertRemoteService {
 
   private async requestModels(key: string): Promise<readonly PanuoyunModel[]> {
     const response = await fetch(`${this.connection().apiOrigin}/v1/models`, { headers: { accept: 'application/json', authorization: `Bearer ${key}` } })
-    if (response.status === 401) await this.ctx.credentials.unset(PANUOYUN_API_KEY_REF)
     if (!response.ok) throw new PanuoyunError('models', response.status)
     const payload: unknown = await response.json().catch(() => undefined)
     const entries = isObject(payload) && Array.isArray(payload.data) ? payload.data : []
@@ -242,7 +242,17 @@ function providerProfile(value: unknown): Record<string, unknown> | undefined {
 function mergeModels(existing: unknown, discovered: readonly PanuoyunModel[]): Array<Record<string, unknown>> {
   const saved = Array.isArray(existing) ? existing.filter(isModelProfile) : []
   const byId = new Map(saved.map(model => [model.id, model]))
-  for (const model of discovered) if (!byId.has(model.id)) byId.set(model.id, { id: model.id })
+  for (const model of discovered) {
+    if (byId.has(model.id)) continue
+    const metadata = resolveModelMetadata(PANUOYUN_PROVIDER, model.id)
+    byId.set(model.id, {
+      id: model.id,
+      ...metadata?.input === undefined ? {} : { input: [...metadata.input] },
+      ...metadata === undefined ? {} : { metadataSource: metadata.source },
+      ...metadata?.contextWindow === undefined ? {} : { contextWindow: metadata.contextWindow },
+      ...metadata?.maxTokens === undefined ? {} : { maxTokens: metadata.maxTokens },
+    })
+  }
   return [...byId.values()]
 }
 function isModelProfile(value: unknown): value is Record<string, unknown> & { id: string } {

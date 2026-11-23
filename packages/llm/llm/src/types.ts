@@ -349,6 +349,8 @@ export interface LlmDiscoveredModel {
   maxTokens?: number
   /** Accepted input types when disclosed by the catalog or endpoint; absent means unknown. */
   inputModalities?: readonly ModelModality[]
+  /** Trusted source that completed fields omitted by the endpoint. */
+  metadataSource?: 'pi-ai-catalog' | 'panuoyun-catalog'
 }
 
 /**

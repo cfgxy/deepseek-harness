@@ -67,18 +67,33 @@ describe('PanuoyunAccount', () => {
     await test.dispose()
   })
 
-  it('uses the selected key only for the model probe and clears it on rejection', async () => {
+  it('preserves the selected key and route when a model probe rejects it', async () => {
     const fetch = vi.fn(async () => response(401, { error: 'invalid key' }))
     vi.stubGlobal('fetch', fetch)
-    const test = await mount({ PANUOYUN_API_KEY: 'selected-secret' })
+    const test = await mount({ PANUOYUN_API_KEY: 'selected-secret' }, {}, {
+      panuoyun: { apiKeyEnv: 'PANUOYUN_API_KEY', api: 'openai-completions', baseURL: 'https://api.apinoria.com/v1', models: [{ id: 'model-a' }] },
+    })
 
     await expect(test.account.models()).rejects.toEqual(expect.objectContaining({ operation: 'models', status: 401 }))
     expect(fetch).toHaveBeenCalledWith(
       'https://api.apinoria.com/v1/models',
       expect.any(Object),
     )
-    await expect(test.ctx.credentials.resolve(PANUOYUN_API_KEY_REF)).resolves.toBeUndefined()
-    expect(test.settings.value.providers.panuoyun).toBeUndefined()
+    await expect(test.ctx.credentials.resolve(PANUOYUN_API_KEY_REF)).resolves.toMatchObject({ value: 'selected-secret' })
+    expect(test.settings.value.providers.panuoyun).toMatchObject({ models: [{ id: 'model-a' }] })
+    await test.dispose()
+  })
+
+  it('rejects an invalid replacement key without destroying the prior working route', async () => {
+    const fetch = vi.fn(async () => response(401, { error: 'invalid key' }))
+    vi.stubGlobal('fetch', fetch)
+    const test = await mount({ PANUOYUN_API_KEY: 'old-secret' }, {}, {
+      panuoyun: { apiKeyEnv: 'PANUOYUN_API_KEY', api: 'openai-completions', baseURL: 'https://api.apinoria.com/v1', models: [{ id: 'model-a' }] },
+    })
+
+    await expect(test.account.selectApiKey('replacement-secret')).rejects.toMatchObject({ operation: 'models', status: 401 })
+    await expect(test.ctx.credentials.resolve(PANUOYUN_API_KEY_REF)).resolves.toMatchObject({ value: 'old-secret' })
+    expect(test.settings.value.providers.panuoyun).toMatchObject({ models: [{ id: 'model-a' }] })
     await test.dispose()
   })
 
@@ -90,7 +105,8 @@ describe('PanuoyunAccount', () => {
     await expect(test.account.selectApiKey('selected-secret')).resolves.toEqual([{ id: 'gpt-5.6-terra' }])
     expect(test.settings.value.providers.panuoyun).toEqual({
       displayName: '派诺云', apiKeyEnv: 'PANUOYUN_API_KEY', api: 'openai-completions',
-      baseURL: 'https://api.apinoria.com/v1', models: [{ id: 'gpt-5.6-terra' }],
+      baseURL: 'https://api.apinoria.com/v1',
+      models: [{ id: 'gpt-5.6-terra', input: ['text', 'image'], metadataSource: 'panuoyun-catalog' }],
     })
     expect(JSON.stringify(test.settings.value)).not.toContain('selected-secret')
     await test.dispose()
