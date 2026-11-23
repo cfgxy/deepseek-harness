@@ -1,0 +1,43 @@
+- button "Back to plugins": Plugins
+- button "Uninstall @deepseek-ai/dsh-experimental-enterprise-runtime-bundle": Uninstall
+- status
+- switch "Enable @deepseek-ai/dsh-experimental-enterprise-runtime-bundle" [checked]
+- heading "@deepseek-ai/dsh-experimental-enterprise-runtime-bundle" [level=3]
+- text: v0.2.2-alpha.2
+- paragraph:
+  - code: "@deepseek-ai/dsh-experimental-enterprise-runtime-bundle"
+- paragraph: Experimental bundle for the declarative enterprise ZIP runtime
+- region "Details":
+  - heading "@deepseek-ai/dsh-experimental-enterprise-runtime-bundle" [level=1]
+  - paragraph:
+    - text: Installable experimental bundle that mounts
+    - code: "@deepseek-ai/dsh-experimental-enterprise-runtime"
+    - text: and its Web Plugin Manager sidebar-detail contribution. Plugin Manager and HMR own this first-level bundle's lifecycle; the runtime owns second-level ZIP inventory beneath its configured storage directory.
+- heading "Components" [level=4]
+- text: 2 total · 1 running
+- list:
+  - listitem:
+    - text: "@deepseek-ai/dsh-experimental-enterprise-runtime Experimental persistent declarative enterprise ZIP capability runtime"
+    - code: enterprise-runtime
+    - text: Not running
+    - switch "Enable component @deepseek-ai/dsh-experimental-enterprise-runtime" [checked]
+  - listitem:
+    - text: Enterprise runtime prototypes Declarative list, detail, chart, and report prototypes in the Plugin Manager sidebar.
+    - code: ui-enterprise-runtime
+    - code: "@deepseek-ai/dsh-experimental-client-ui-enterprise-runtime"
+    - text: Running
+    - switch "Enable component Enterprise runtime prototypes" [checked]
+- heading "Source" [level=4]
+- term: Code source
+- definition:
+  - code: file:{{bundle}}
+- term: Current version
+- definition: 0.2.2-alpha.2
+- heading "Enterprise capability prototypes" [level=3]
+- paragraph: Runtime API v1 returns lossless JSON and accepts only declarative templates.
+- list:
+  - listitem: "List: a queryable collection."
+  - listitem: "Detail: selected fields for one record."
+  - listitem: "Chart: bar, line, or pie data projection."
+  - listitem: "Report: ordered JSON-safe sections."
+- paragraph: "Langfuse example: How many traces were recorded in the selected period? No Langfuse connector is bundled."
