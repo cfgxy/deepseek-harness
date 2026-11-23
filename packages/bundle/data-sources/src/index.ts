@@ -3,7 +3,8 @@ import z from '@deepseek-ai/schemastery'
 import { createMcpToolDefinition } from '@deepseek-ai/dsh-mcp-client'
 import type {} from '@deepseek-ai/dsh-credentials'
 import type {} from '@deepseek-ai/dsh-tools'
-import { ConnectorSupervisor, type ReadConnector } from './supervisor.ts'
+import { LocalDirectoryConnector } from './local-directory.ts'
+import { ConnectorSupervisor } from './supervisor.ts'
 import type { ReadRequest, SourceConfig } from './types.ts'
 
 export const name = 'data-sources'
@@ -50,7 +51,7 @@ function mcpText(value: unknown): { content: { type: 'text'; text: string }[] } 
 }
 
 /** Register native read tools through the MCP result adapter so every result has one canonical projection. */
-export function applyDataSourceTools(ctx: Context, supervisor: ConnectorSupervisor): void {
+function applyDataSourceTools(ctx: Context, supervisor: ConnectorSupervisor): void {
   ctx.effect(() => ctx.tools.register(createMcpToolDefinition(ctx, {
     name: 'data_sources_list', rawName: 'data_sources_list', description: 'List configured read-only data sources without credentials.',
     inputSchema: { type: 'object', additionalProperties: false },
@@ -73,8 +74,8 @@ export function applyDataSourceTools(ctx: Context, supervisor: ConnectorSupervis
   })))
 }
 
-/** Install configuration-owned tools. Concrete connectors are intentionally supplied by a deployment integration. */
+/** Install configuration-owned tools and the built-in local read connector. */
 export function apply(ctx: Context, config: Config): void {
-  const supervisor = new ConnectorSupervisor(config.sources, [] as ReadConnector[], ctx.credentials)
+  const supervisor = new ConnectorSupervisor(config.sources, [new LocalDirectoryConnector()], ctx.credentials)
   applyDataSourceTools(ctx, supervisor)
 }

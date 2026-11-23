@@ -1,4 +1,8 @@
+import { mkdtemp, mkdir, rm, symlink, writeFile } from 'node:fs/promises'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
 import { describe, expect, it, vi } from 'vitest'
+import { LocalDirectoryConnector } from '../src/local-directory.ts'
 import { ConnectorSupervisor, type ConnectorRequest, type ReadConnector } from '../src/supervisor.ts'
 import type { ReadOperation, SourceConfig, SourceKind } from '../src/types.ts'
 
@@ -116,6 +120,32 @@ describe('read-only data source supervisor', () => {
       apiVersion: 'v1', sourceId: 'mysql', operation: 'sql.query', input: { sql: `SELECT 1 ${clause} '/tmp/fixture'` },
     })).rejects.toThrow('only one SELECT')
     expect(execute).not.toHaveBeenCalled()
+  })
+
+  it('bounds real local reads and rejects a symlink which escapes the configured root', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'dsh-data-sources-'))
+    const outside = await mkdtemp(join(tmpdir(), 'dsh-data-sources-outside-'))
+    try {
+      await writeFile(join(root, 'report.txt'), 'abcdef')
+      await mkdir(join(root, 'nested'))
+      await writeFile(join(outside, 'secret.txt'), 'secret')
+      await symlink(outside, join(root, 'escape'))
+      const local: SourceConfig = {
+        ...source('local-directory'),
+        policy: { maxBytes: 3, maxRows: 10, allowedPath: root },
+      }
+      const supervisor = new ConnectorSupervisor([local], [new LocalDirectoryConnector()], { resolve: async () => undefined })
+
+      await expect(supervisor.execute({
+        apiVersion: 'v1', sourceId: local.id, operation: 'object.read', input: { path: join(root, 'report.txt') },
+      })).resolves.toMatchObject({ data: { content: 'abc', bytes: 3 }, truncated: true })
+      await expect(supervisor.execute({
+        apiVersion: 'v1', sourceId: local.id, operation: 'object.read', input: { path: join(root, 'escape', 'secret.txt') },
+      })).rejects.toThrow('escapes')
+    } finally {
+      await rm(root, { recursive: true, force: true })
+      await rm(outside, { recursive: true, force: true })
+    }
   })
 
   it('rejects a source-kind operation that could imply a write-capable adapter command', async () => {
