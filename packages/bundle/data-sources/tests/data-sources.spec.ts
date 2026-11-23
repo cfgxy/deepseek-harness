@@ -27,7 +27,16 @@ function connector(kind: SourceKind): ReadConnector {
     kind,
     async probe(_input) {},
     async execute(input: ConnectorRequest) {
-      return { data: { kind, operation: input.request.operation, credentialUsed: input.credential !== undefined }, truncated: false }
+      return {
+        data: {
+          kind,
+          operation: input.request.operation,
+          credentialUsed: input.credential !== undefined,
+          maxBytes: input.request.maxBytes,
+          maxRows: input.request.maxRows,
+        },
+        truncated: false,
+      }
     },
   }
 }
@@ -42,7 +51,12 @@ describe('read-only data source supervisor', () => {
     expect(probe).toMatchObject({ source: { id: source(kind).id, revision: '1' }, connector: kind })
 
     expect(result.source).toEqual({ id: source(kind).id, revision: '1' })
-    expect(result.data).toMatchObject({ kind, credentialUsed: kind !== 'local-directory' })
+    expect(result.data).toMatchObject({
+      kind,
+      credentialUsed: kind !== 'local-directory',
+      maxBytes: 1024,
+      maxRows: 10,
+    })
     expect(result.evidence.connector).toBe(kind)
     expect(JSON.stringify(result)).not.toContain('fixture-secret')
   })
@@ -69,10 +83,19 @@ describe('read-only data source supervisor', () => {
     expect(execute).not.toHaveBeenCalled()
   })
 
-  it.each(['local-directory', 'sftp'] as const)('rejects %s paths outside its configured root', async (kind) => {
+  it.each(['local-directory', 'sftp'] as const)('rejects %s normalized paths outside its configured root', async (kind) => {
     const supervisor = new ConnectorSupervisor([source(kind)], [connector(kind)], { resolve: async () => ({ value: 'fixture-secret' }) })
+    for (const path of ['/outside/', '/fixtures/../outside/']) {
+      await expect(supervisor.execute({
+        apiVersion: 'v1', sourceId: source(kind).id, operation: 'directory.list', input: { path },
+      })).rejects.toThrow('outside source')
+    }
+  })
+
+  it('rejects S3 prefix traversal', async () => {
+    const supervisor = new ConnectorSupervisor([source('s3')], [connector('s3')], { resolve: async () => ({ value: 'fixture-secret' }) })
     await expect(supervisor.execute({
-      apiVersion: 'v1', sourceId: source(kind).id, operation: 'directory.list', input: { path: '/outside/' },
+      apiVersion: 'v1', sourceId: 's3', operation: 'object.read', input: { path: 'reports/../private.csv' },
     })).rejects.toThrow('outside source')
   })
 

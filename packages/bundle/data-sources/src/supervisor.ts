@@ -65,11 +65,11 @@ export class ConnectorSupervisor {
   async execute(request: ReadRequest): Promise<ReadResult> {
     if (request.apiVersion !== 'v1') throw new Error('data-sources: unsupported api version')
     const source = this.#source(request.sourceId)
-    guardRead(source, request)
+    const admitted = guardRead(source, request)
     const connector = this.#connectors.get(source.kind)
     if (connector === undefined) throw new Error(`data-sources: connector ${source.kind} is unavailable`)
     const credential = await this.#credential(source)
-    const result = await connector.execute({ source, request, ...(credential === undefined ? {} : { credential }) })
+    const result = await connector.execute({ source, request: admitted, ...(credential === undefined ? {} : { credential }) })
     return {
       source: { id: source.id, revision: source.revision },
       data: result.data,

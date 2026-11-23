@@ -53,4 +53,16 @@ export function assertSourceConfig(source: SourceConfig): void {
   if (!Number.isInteger(source.policy.maxRows) || source.policy.maxRows < 1) {
     throw new Error(`data-sources: source ${source.id} maxRows must be a positive integer`)
   }
+  if ((source.kind === 'local-directory' || source.kind === 'sftp')
+    && (source.policy.allowedPath === undefined || !source.policy.allowedPath.startsWith('/') || source.policy.allowedPrefix !== undefined)) {
+    throw new Error(`data-sources: source ${source.id} requires an absolute allowedPath only`)
+  }
+  if (source.kind === 's3'
+    && (source.policy.allowedPrefix === undefined || source.policy.allowedPrefix.trim() === '' || source.policy.allowedPath !== undefined)) {
+    throw new Error(`data-sources: source ${source.id} requires an allowedPrefix only`)
+  }
+  if ((source.kind === 'mysql' || source.kind === 'postgresql')
+    && (source.policy.allowedPath !== undefined || source.policy.allowedPrefix !== undefined)) {
+    throw new Error(`data-sources: source ${source.id} does not accept a path or prefix policy`)
+  }
 }

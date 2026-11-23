@@ -6,11 +6,6 @@ import type {} from '@deepseek-ai/dsh-tools'
 import { ConnectorSupervisor, type ReadConnector } from './supervisor.ts'
 import type { ReadRequest, SourceConfig } from './types.ts'
 
-export { ConnectorSupervisor } from './supervisor.ts'
-export type { ConnectorRequest, CredentialResolver, ReadConnector } from './supervisor.ts'
-export type { ReadOperation, ReadRequest, ReadResult, SourceConfig, SourceKind } from './types.ts'
-export { guardRead } from './policy.ts'
-
 export const name = 'data-sources'
 export const inject = ['tools', 'credentials']
 

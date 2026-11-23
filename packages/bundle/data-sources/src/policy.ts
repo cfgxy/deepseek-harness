@@ -1,3 +1,4 @@
+import { posix } from 'node:path'
 import type { ReadOperation, ReadRequest, SourceConfig } from './types.ts'
 
 const SQL_READ = /^(?:select|with|explain|show)\b/i
@@ -15,8 +16,25 @@ function operationAllowed(kind: SourceConfig['kind'], operation: ReadOperation):
   return operation === 'catalog' || operation === 'object.read'
 }
 
-/** Enforce source-local read policy before a connector receives an operation. */
-export function guardRead(source: SourceConfig, request: ReadRequest): void {
+function allowedPath(source: SourceConfig, candidate: string): boolean {
+  const root = source.policy.allowedPath
+  if (root === undefined) return false
+  const normalizedRoot = posix.normalize(root)
+  const normalizedCandidate = posix.normalize(candidate)
+  return normalizedCandidate === normalizedRoot || normalizedCandidate.startsWith(`${normalizedRoot}/`)
+}
+
+function allowedPrefix(source: SourceConfig, candidate: string): boolean {
+  const prefix = source.policy.allowedPrefix
+  if (prefix === undefined) return false
+  const normalized = posix.normalize(candidate.replace(/^\/+/, ''))
+  const normalizedPrefix = posix.normalize(prefix.replace(/^\/+|\/+$/g, ''))
+  return normalized !== '..' && !normalized.startsWith('../')
+    && (normalized === normalizedPrefix || normalized.startsWith(`${normalizedPrefix}/`))
+}
+
+/** Enforce source-local read policy and return an operation with concrete output budgets. */
+export function guardRead(source: SourceConfig, request: ReadRequest): ReadRequest {
   if (!source.enabled) throw new Error(`data-sources: source ${source.id} is disabled`)
   if (!operationAllowed(source.kind, request.operation)) {
     throw new Error(`data-sources: ${request.operation} is not permitted for ${source.kind}`)
@@ -35,9 +53,12 @@ export function guardRead(source: SourceConfig, request: ReadRequest): void {
   }
   if (request.operation === 'object.read' || request.operation === 'directory.list') {
     const path = stringInput(request.input, 'path')
-    const root = source.policy.allowedPath ?? source.policy.allowedPrefix
-    if (root === undefined || !path.startsWith(root)) {
-      throw new Error(`data-sources: path is outside source ${source.id} allow-list`)
-    }
+    const allowed = source.kind === 's3' ? allowedPrefix(source, path) : allowedPath(source, path)
+    if (!allowed) throw new Error(`data-sources: path is outside source ${source.id} allow-list`)
+  }
+  return {
+    ...request,
+    maxBytes: request.maxBytes ?? source.policy.maxBytes,
+    maxRows: request.maxRows ?? source.policy.maxRows,
   }
 }
