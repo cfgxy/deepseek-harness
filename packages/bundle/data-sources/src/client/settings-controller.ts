@@ -47,9 +47,6 @@ export interface DataSourcesCardFace {
   test: (sourceId: string) => void
 }
 
-type ProbeResponse = { ok: boolean; value?: { ok: boolean; message?: string }; error?: { message?: string } }
-type ProbeRemote = { dataSources?: { probe: (request: { sourceId: string }) => Promise<ProbeResponse> } }
-
 const kinds: readonly SourceKind[] = ['local-directory', 's3', 'sftp', 'mysql', 'postgresql']
 const text = (value: unknown): string => typeof value === 'string' ? value : ''
 const integer = (value: unknown): string => typeof value === 'number' && Number.isInteger(value) ? String(value) : ''
@@ -154,19 +151,13 @@ export class DataSourcesSettingsController {
 
   /** Probe only by source id. The browser never handles the source credential. */
   private test(sourceId: string): void {
-    const remote = this.ctx.remote as unknown as ProbeRemote
-    const probe = remote.dataSources?.probe
-    if (probe === undefined) {
-      this.probes = { ...this.probes, [sourceId]: { pending: false, message: 'Connection testing is unavailable in this Host.' } }
-      this.publish()
-      return
-    }
+    const probe = this.ctx.remote.dataSources.probe
     this.probes = { ...this.probes, [sourceId]: { pending: true, message: 'Testing connection…' } }
     this.publish()
     void probe({ sourceId }).then((response) => {
-      const message = response.ok && response.value?.ok
-        ? 'Connection succeeded.'
-        : response.value?.message ?? response.error?.message ?? 'Connection failed.'
+      const message = response.ok
+        ? response.value.ok ? 'Connection succeeded.' : response.value.message ?? 'Connection failed.'
+        : response.error.message ?? 'Connection failed.'
       this.probes = { ...this.probes, [sourceId]: { pending: false, message } }
       this.publish()
     }, () => {

@@ -14,6 +14,8 @@ test('client registers a credential-safe settings page and releases every lifeti
   const primitives = { Button() { return null }, Input() { return null } }
   const clientStore = { createSnapshotStore(value) { let snapshot = value; return { getSnapshot() { return snapshot }, subscribe() { return () => {} }, set(next) { snapshot = next } } } }
   const client = registration.factory((specifier) => {
+    if (specifier === 'zod') return { z: {} }
+    if (specifier === '@deepseek-ai/dsh-typert-protocol/remote-info') return { createTypertRemoteInfo(value) { return value } }
     if (specifier === 'react') return React
     if (specifier === 'react/jsx-runtime') return jsxRuntime
     if (specifier === '@deepseek-ai/dsh-client-ui-primitives') return primitives
@@ -47,17 +49,27 @@ test('client registers a credential-safe settings page and releases every lifeti
     subscribe() { return () => { scopeDisposed += 1 } },
     async mutate(ops) { writes.push(ops); return true },
   }
+  let remoteDisposed = 0
+  let injectedDisposed = 0
+  const remote = {
+    dataSources: { async probe() { return { ok: true, value: { ok: true } } } },
+    async $mount() { return async () => { remoteDisposed += 1 } },
+  }
   const ctx = {
     effect(callback) { cleanups.push(callback()) },
+    inject(_deps, callback) {
+      callback({ ...ctx, effect(effect) { cleanups.push(effect()) } })
+      return { async dispose() { injectedDisposed += 1 } }
+    },
     locale: { register() { return () => { localeDisposed += 1 } }, bind() { return key => key } },
-    remote: {},
+    remote,
     configForms: { get() { return scope }, whileServed(_names, register) { return register() } },
     slots: {
       inject(_name, callback) { return callback() },
       register(definition, component) { registrations.push({ definition, component }); return () => { slotDisposed += 1 } },
     },
   }
-  client.apply(ctx)
+  const dispose = await client.apply(ctx)
   const page = registrations.find(entry => entry.definition.name === 'plugins.item')
   assert.notEqual(page, undefined)
   const face = page.definition.inject()
@@ -84,9 +96,13 @@ test('client registers a credential-safe settings page and releases every lifeti
     assert.doesNotMatch(saved, new RegExp(secret))
   }
   face.test('fixture')
-  assert.match(face.hooks.dataSourcesSettings.getSnapshot().probes.fixture.message, /unavailable/)
+  await new Promise(resolve => setImmediate(resolve))
+  assert.match(face.hooks.dataSourcesSettings.getSnapshot().probes.fixture.message, /succeeded/)
 
+  await dispose()
   for (const cleanup of cleanups.reverse()) cleanup?.()
+  assert.equal(remoteDisposed, 1)
+  assert.equal(injectedDisposed, 1)
   assert.equal(scopeDisposed, 1)
   assert.equal(localeDisposed, 1)
   assert.equal(slotDisposed, 1)

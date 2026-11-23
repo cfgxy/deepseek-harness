@@ -7227,6 +7227,10 @@ importers:
         version: 18.3.1
 
   packages/client/web:
+    dependencies:
+      '@deepseek-ai/dsh-typert-protocol':
+        specifier: workspace:*
+        version: link:../../typert/protocol
     devDependencies:
       '@deepseek-ai/cordis':
         specifier: workspace:~

@@ -89,3 +89,33 @@ it('renders and saves the assembled source editor with only a credential referen
   await unmountAssembledApp()
   expect(document.querySelector('[data-plugin-item="data-sources"]')).toBeNull()
 })
+
+it('invokes the assembled Host probe and renders success', async () => {
+  const remote = mountAssembledApp({
+    additionalPlugins: [dataSourcesPlugin()],
+    remote: { dataSources: { probe: { ok: true } } },
+  })
+
+  await openDataSourcesSettings()
+  fireEvent.click(screen.getByRole('button', { name: /test connection/i }))
+  await waitFor(() => { expect(screen.getByRole('status').textContent).toContain('Connection succeeded.') })
+  expect(remote.mock.log.calls('dataSources/probe')).toHaveLength(1)
+  expect(remote.mock.log.requests('dataSources/probe')).toEqual([{ request: { sourceId: 'source-1' } }])
+
+  await unmountAssembledApp()
+})
+
+it('renders the fixed safe failure from the assembled Host probe', async () => {
+  const remote = mountAssembledApp({
+    additionalPlugins: [dataSourcesPlugin()],
+    remote: { dataSources: { probe: { ok: false, message: 'Connection test failed.' } } },
+  })
+
+  await openDataSourcesSettings()
+  fireEvent.click(screen.getByRole('button', { name: /test connection/i }))
+  await waitFor(() => { expect(screen.getByRole('status').textContent).toContain('Connection test failed.') })
+  expect(remote.mock.log.calls('dataSources/probe')).toHaveLength(1)
+  expect(remote.mock.log.requests('dataSources/probe')).toEqual([{ request: { sourceId: 'source-1' } }])
+
+  await unmountAssembledApp()
+})

@@ -184,6 +184,8 @@ export interface AssembledRemoteOptions {
     readonly writable?: boolean
     readonly mutationsAccepted?: boolean
     readonly sources?: readonly unknown[]
+    /** Safe Host-side probe response served through the real Typert endpoint. */
+    readonly probe?: { readonly ok: boolean; readonly message?: string }
   }
 }
 
@@ -263,6 +265,7 @@ export function createAssembledRemote(options: AssembledRemoteOptions = {}): Ass
     : {
       writable: options.dataSources.writable ?? true,
       mutationsAccepted: options.dataSources.mutationsAccepted ?? true,
+      probe: options.dataSources.probe ?? { ok: true },
       revision: 0,
       base: { sources: structuredClone(options.dataSources.sources ?? []) },
       user: {} as Record<string, unknown>,
@@ -362,6 +365,13 @@ export function createAssembledRemote(options: AssembledRemoteOptions = {}): Ass
   })
 
   mock.unary('settings/describe', () => settingsDescribe())
+  mock.unary('dataSources/probe', (payload: unknown) => {
+    const request = isRecord(payload) ? payload.request : undefined
+    if (dataSources === undefined || !isRecord(request) || typeof request.sourceId !== 'string') {
+      throw new TypeError('assembled fixture data-sources probe is invalid')
+    }
+    return ok(structuredClone(dataSources.probe))
+  })
   mock.unary('credentials/describe', (request: unknown) => {
     if (imageIterate === undefined) return structuredClone(fixture.credentialsDescribe)
     const refs = isRecord(request) ? request.refs : undefined

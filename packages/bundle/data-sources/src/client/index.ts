@@ -5,6 +5,8 @@ import type {} from '@deepseek-ai/dsh-client-locale/client'
 import type {} from '@deepseek-ai/dsh-client-ui-plugin-manager/client'
 import type {} from '@deepseek-ai/dsh-client-ui-renderer/client'
 import type {} from '@deepseek-ai/dsh-client-ui-settings/client'
+import type {} from '@ruyi/dsh-data-sources/remote'
+import remote from '@ruyi/dsh-data-sources/remote'
 import { DataSourcesCard } from './DataSourcesCard.tsx'
 import { en, zh, type DataSourcesLocaleKey } from './locales.ts'
 import { DATA_SOURCES_NS, DataSourcesSettingsController } from './settings-controller.ts'
@@ -20,12 +22,19 @@ declare module '@deepseek-ai/dsh-client-ui-slots' {
 }
 
 /** Register the source list and editor only for Hosts serving the data-sources namespace. */
-export function apply(ctx: Context): void {
-  ctx.effect(() => ctx.locale.register(NS, { en, zh }), 'data-sources: dictionaries')
-  const card = new DataSourcesSettingsController(ctx.configForms.get(DATA_SOURCES_NS), ctx)
-  ctx.effect(() => () => { card.dispose() }, 'data-sources: settings subscription')
-  const t = ctx.locale.bind(NS)
-  ctx.effect(() => ctx.configForms.whileServed([DATA_SOURCES_NS], () => ctx.slots.inject('plugins.item', () => ctx.slots.register({
-    name: 'plugins.item', id: 'data-sources', order: 32, label: () => t('title'), locale: NS, inject: () => card.inject(),
-  }, DataSourcesCard))), 'data-sources: plugin settings page')
+export async function apply(ctx: Context): Promise<() => Promise<void>> {
+  const disposeRemote = await ctx.remote.$mount(remote)
+  const ui = ctx.inject(['remote.dataSources'], (remoteCtx) => {
+    remoteCtx.effect(() => remoteCtx.locale.register(NS, { en, zh }), 'data-sources: dictionaries')
+    const card = new DataSourcesSettingsController(remoteCtx.configForms.get(DATA_SOURCES_NS), remoteCtx)
+    remoteCtx.effect(() => () => { card.dispose() }, 'data-sources: settings subscription')
+    const t = remoteCtx.locale.bind(NS)
+    remoteCtx.effect(() => remoteCtx.configForms.whileServed([DATA_SOURCES_NS], () => remoteCtx.slots.inject('plugins.item', () => remoteCtx.slots.register({
+      name: 'plugins.item', id: 'data-sources', order: 32, label: () => t('title'), locale: NS, inject: () => card.inject(),
+    }, DataSourcesCard))), 'data-sources: plugin settings page')
+  })
+  return async () => {
+    await ui.dispose()
+    await disposeRemote()
+  }
 }
