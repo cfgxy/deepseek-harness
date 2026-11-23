@@ -4,7 +4,9 @@
 
 ## 结论
 
-**有条件可行，但没有可直接安装的现成 DSH 数据源插件。** DeepSeek Harness（DSH）已经原生提供了可安装 bundle、Plugins 侧栏与配置页、工具注册、凭据模板、MCP 桥接和动态重载；最短方案是新建很薄的 `@ruyi/dsh-data-sources` bundle，直接复用 DSH 的插件管理与 MCP client/manager，而不是从零写聊天宿主、插件加载器或连接器协议。
+**有条件可行，但当前 Fork 没有可直接安装的现成 DSH 数据源插件。** DeepSeek Harness（DSH）已经原生提供可安装 bundle、Plugins 侧栏与配置页、工具注册、凭据引用、MCP client 与动态重载；最短方案是新建很薄的 `@ruyi/dsh-data-sources` bundle，直接复用 DSH 的插件管理与 `dsh-mcp-client`，而不是从零写聊天宿主、插件加载器或连接器协议。
+
+> Fork 兼容性更正：本 PR 目标 Fork 当前为 `0.2.2-alpha.2`，根 `package.json` 要求 Node `>=24.9.0`。它包含 `packages/mcp/mcp-client` 与 `mcp-resources`，**不包含 `dsh-mcp-manager`**；因此 MVP 必须在 bundle 内管理 source registry、probe 与 MCP 生命周期，不能依赖 manager 的运行时配置或 credential-template API。
 
 MVP 的连接器通过受约束 MCP server 运行：本地目录和 PostgreSQL 有可直接采用的候选；S3 采用后可立即进入 POC；MySQL 只能 fork/收紧；SFTP 无质量达标候选，需要小型自研 adapter（建立在成熟 SSH/SFTP library 上）。所有连接默认只读，凭据仅以 DSH credential 引用保存。
 
@@ -17,8 +19,8 @@ MVP 的连接器通过受约束 MCP server 运行：本地目录和 PostgreSQL �
 | 独立安装、启停、卸载 bundle | 原生支持 | [`publish.md`](https://github.com/deepseek-ai/deepseek-harness/blob/4b399c39a6d1479cd84ca591b4d7c88e24d38a96/docs/user/develop/basic/publish.md) 定义 `dsh.bundle`、profile 层次及 `dsh plugin add/remove`；`plugin-manager` 记录安装前检查、兼容性和 HMR/重启语义。安装的 Host 代码进程内执行，不能把包安装当作沙箱。 |
 | Plugins 侧栏、配置 UI | 原生支持 | [`ui-plugin-manager`](https://github.com/deepseek-ai/deepseek-harness/blob/4b399c39a6d1479cd84ca591b4d7c88e24d38a96/packages/client/ui-plugin-manager/README.md#configuration-pages) 提供 `plugins.bundle.config`、`plugins.row.config` 与 `settings.section`；[`ui-sidebar`](https://github.com/deepseek-ai/deepseek-harness/blob/4b399c39a6d1479cd84ca591b4d7c88e24d38a96/packages/client/ui-sidebar/README.md#global-panel-entries) 也允许以 `sidebar.panellist` + `main` 添加独立面板。MVP 首选 Plugins 配置页，避免先做一个不必要的新主面板。 |
 | 对话工具注册和生命周期卸载 | 原生支持 | [`adding-a-tool.md`](https://github.com/deepseek-ai/deepseek-harness/blob/4b399c39a6d1479cd84ca591b4d7c88e24d38a96/docs/cookbook/adding-a-tool.md) 的 `ctx.tools.register()`；注册是 effect，插件卸载时自动注销。工具输入 schema 由 DSH 校验，但业务越权校验仍由插件负责。 |
-| 外部数据服务接入 | 原生支持（MCP 适配） | [`dsh-mcp-client`](https://github.com/deepseek-ai/deepseek-harness/blob/4b399c39a6d1479cd84ca591b4d7c88e24d38a96/packages/mcp/mcp-client/README.md) 将 stdio/Streamable HTTP MCP 工具注册为 `mcp__<server>__<tool>`；[`dsh-mcp-manager`](https://github.com/deepseek-ai/deepseek-harness/blob/4b399c39a6d1479cd84ca591b4d7c88e24d38a96/packages/mcp/mcp-manager/README.md) 支持运行时配置、probe、启停和 plugin-lifetime registration。 |
-| 凭据隔离 | 原生支持，但需按约束配置 | `mcp-manager`/`mcp-client` 支持 `${credential:REF}`，运行时展开并在诊断中脱敏；不能把 DSN、access key 或私钥写进配置、tool 参数、日志或会话。 |
+| 外部数据服务接入 | 原生支持（MCP 适配） | `dsh-mcp-client` 将 stdio/Streamable HTTP MCP 工具注册为 `mcp__<server>__<tool>`。目标 Fork 未包含 `dsh-mcp-manager`；本插件必须自行实现 source 生命周期、probe 和受限命令构造。 |
+| 凭据隔离 | 原生 credential seam 支持，需由本插件解析引用 | `ctx.credentials.resolve()` 支持按操作读取 credential ref；配置、工具参数、日志和会话不得包含 DSN、access key 或私钥。 |
 | 插件市场 | 只有通用索引机制，**没有官方默认市场/数据连接器目录** | [`plugin-market.md`](https://github.com/deepseek-ai/deepseek-harness/blob/4b399c39a6d1479cd84ca591b4d7c88e24d38a96/docs/user/guide/plugin-market.md) 明确 DSH 不带 index source，第三方 index 声明不构成 DSH 背书；本次源码关键词检索未发现 PostgreSQL、MySQL、SFTP、S3/MinIO/OSS 或 datasource 的第一方 connector。 |
 | 插件公开 API / 浏览器 Remote | 原生支持，需自定义实现 | [`adding-a-remote-api.md`](https://github.com/deepseek-ai/deepseek-harness/blob/4b399c39a6d1479cd84ca591b4d7c88e24d38a96/docs/cookbook/adding-a-remote-api.md) 定义 `TypertRemoteService`/`@Remote`、失败码和 client codec；它不是现成数据源 API。 |
 
@@ -26,7 +28,7 @@ MVP 的连接器通过受约束 MCP server 运行：本地目录和 PostgreSQL �
 
 | 候选 | 覆盖与证据 | 许可证 / 维护信号 | 判定 |
 |---|---|---|---|
-| DSH `dsh-mcp-manager` + `dsh-mcp-client` | 支持受控 stdio/HTTP MCP、连接状态、probe、credential template、工具注册；上表官方源码定位 | DSH MIT；与当前 `0.2.3-alpha.2` 同仓同版本 | **直接采用**，作为所有 connector 的宿主适配层。 |
+| DSH `dsh-mcp-client` + bundle 内 source supervisor | `mcp-client` 支持受控 stdio/HTTP MCP、工具注册和 lifecycle；目标 Fork 的 credential seam 支持每次操作解析 credential ref | DSH MIT；与当前 Fork `0.2.2-alpha.2` 同仓同版本 | **直接采用 client 与 credential seam；自行实现 source registry/probe/启停**。不得引用目标 Fork 不存在的 `mcp-manager`。 |
 | [`@modelcontextprotocol/server-filesystem`](https://github.com/modelcontextprotocol/servers/tree/c799c8552b0f27b7a33a7b9233773da144dddcf5/src/filesystem) | 支持 allowed roots、`--read-only`、路径/符号链接防逃逸；MCP 官方 reference repo 当前有活跃提交 | MCP repo 正在由 MIT 过渡到 Apache-2.0，具体源码贡献须按仓库 LICENSE 处理；Node `>=24` | **直接采用**于本地目录：固定绝对 allow-list + `--read-only`；不得依赖已废弃 Roots 动态授权。 |
 | [`txn2/mcp-s3`](https://github.com/txn2/mcp-s3) | AWS S3 与 S3-compatible；README 声明只读默认、prefix ACL、对象大小上限、审计开关；支持自定义 endpoint/path style | Apache-2.0；有 Go package、CI/scorecard/coverage 链接，但星标量低（调查时 11） | **POC 直接采用，量产前安全评审**。设 `MCP_S3_EXT_READONLY=true`、大小上限和 prefix；运行权限仍以云 IAM policy 为最终边界。 |
 | [`mcp-postgres-server`](https://github.com/antonorlov/mcp-postgres-server) | `PG_ALLOW_WRITE=false` 默认；`BEGIN READ ONLY`、单语句、参数绑定、结果字节/statement timeout、TLS 和可选 SSH host-key verification | MIT；CI badge，依赖面小；调查时 25 stars | **直接采用 POC，生产前封装**。必须使用独立只读 DB role；客户端限制不替代服务端权限。 |
@@ -55,7 +57,7 @@ MVP 的连接器通过受约束 MCP server 运行：本地目录和 PostgreSQL �
 Harness profile
   ├─ @ruyi/dsh-data-sources（独立一级 bundle）
   │    ├─ SourceRegistry：配置、sourceId、策略、审计摘要
-  │    ├─ ConnectorSupervisor：委托 DSH McpClientHost/McpManager
+  │    ├─ ConnectorSupervisor：构造受限 MCP client 实例并管理其生命周期
   │    ├─ PolicyGuard：限制 source、路径、SQL 类别、分页与结果预算
   │    ├─ 只读工具：list_sources / inspect_source / query_source / read_object
   │    ├─ 配置页：Plugins → Data Sources
@@ -101,15 +103,18 @@ type ReadResult = {
 
 ### 已完成的调查验证
 
-- 已检出并核查官方 DSH 源码 commit `4b399c39a6d1479cd84ca591b4d7c88e24d38a96`；源码与文档确认 bundle、Plugins 配置页、tool lifecycle、MCP manager/client、credential templates 和 Remote API 均存在。
+- 已检出并核查目标 Fork；当前根 `package.json` 版本为 `0.2.2-alpha.2`、Node 要求为 `>=24.9.0`，包含 bundle、Plugins 配置页、tool lifecycle、MCP client、credential seam 和 Remote API。它不包含 `mcp-manager`，本文已改为 bundle 内 supervisor 设计。
+
 - 对该 commit 做第一方关键词 inventory（PostgreSQL、MySQL、SFTP、S3/MinIO/OSS、datasource）无数据 connector 命中；因此“直接安装现成 DSH 数据源插件”不可成立。
 - 已核查 connector 候选的源码/README 与许可证元数据，形成上表复用决策。
 
-### 未完成的运行 POC 与唯一阻塞
+### 当前本地构建状态与唯一阻塞
 
-本工作机没有 `dsh` 可执行文件，且 Node 是 `v22.22.3`，不满足调查基线要求的 Node 24；同时尚未实现/发布 `@ruyi/dsh-data-sources` bundle。因而**不能诚实报告真实 Harness 对话、真实数据源连接或 UI 截图已通过**。这阻断的是运行验收，不阻断本文的源码级可行性结论。
+已切换到本机 Node `v24.16.0`（满足目标 Fork 的 `>=24.9.0`）并在 Fork 执行依赖安装与 `build:artifacts`。安装未能完成：锁文件要求的 `https://cdn.sheetjs.com/xlsx-0.20.3/xlsx-0.20.3.tgz` 在本机重复 TLS/fetch timeout；`pnpm` 的离线重试也确认该 tarball 不在本地 store。因此尚未产生 `dsh` 二进制、没有启动 Harness，也没有把构建失败误报为 POC 通过。
 
-具备 Node 24、DSH `0.2.3-alpha.2` 和隔离 fixture 后，最小验证按以下顺序执行：
+这是第三方供应 tarball 的**环境阻塞**，不等同插件实现完成。恢复条件是让该锁定 tarball 可达或预置到 pnpm store；恢复后需先完成原样 `pnpm install --frozen-lockfile && pnpm run build:artifacts`，再实施并验证 bundle。
+
+具备可构建的目标 Fork、隔离 fixture 后，最小验证按以下顺序执行：
 
 1. `dsh plugin --profile datasource-poc add <pinned-built-tarball>`，在 Plugins 页面启用 bundle，确认只出现 Data Sources 配置页；卸载后工具和页面消失。
 2. 添加只读临时目录 source，先列文件再读取 fixture；对根外路径与写工具调用断言拒绝。
