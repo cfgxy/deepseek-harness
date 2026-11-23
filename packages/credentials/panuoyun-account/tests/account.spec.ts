@@ -4,16 +4,20 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import { MemoryCredentials } from '../../credentials/tests/memory.ts'
 import {
   PANUOYUN_API_KEY_REF, PANUOYUN_JWT_REF, PanuoyunAccount, PanuoyunError,
+  enterpriseLoginOrigin,
 } from '../src/index.ts'
 
 function response(status: number, body: unknown): Response {
   return new Response(JSON.stringify(body), { status, headers: { 'content-type': 'application/json' } })
 }
 
-async function mount(seed: Record<string, string> = {}) {
+async function mount(
+  seed: Record<string, string> = {},
+  config: { mode?: 'personal' | 'enterprise'; enterpriseLoginOrigin?: string } = {},
+) {
   const ctx = new Context()
   await ctx.plugin(MemoryCredentials, seed)
-  const fiber = await ctx.plugin(PanuoyunAccount)
+  const fiber = await ctx.plugin(PanuoyunAccount, config)
   return { ctx, account: ctx.panuoyunAccount, dispose: () => fiber.dispose() }
 }
 
@@ -88,12 +92,50 @@ describe('PanuoyunAccount', () => {
     await test.dispose()
   })
 
-  it('does not store a malformed login response', async () => {
+  it('rejects a malformed login response without storing a JWT', async () => {
     vi.stubGlobal('fetch', vi.fn(async () => response(200, { data: {} })))
     const test = await mount()
 
     await expect(test.account.login('member@example.com', 'password-secret')).rejects.toBeInstanceOf(PanuoyunError)
     await expect(test.ctx.credentials.resolve(credentialRef('PANUOYUN_JWT'))).resolves.toBeUndefined()
     await test.dispose()
+  })
+
+  it('uses the personal API origin by default', async () => {
+    const fetch = vi.fn(async () => response(200, { data: { token: 'jwt-secret' } }))
+    vi.stubGlobal('fetch', fetch)
+    const test = await mount()
+
+    await test.account.login('member@example.com', 'password-secret')
+    expect(fetch).toHaveBeenCalledWith('https://api.apinoria.com/api/v1/auth/login', expect.any(Object))
+    await test.dispose()
+  })
+
+  it('uses the enterprise login origin only for login, preserving the fixed enterprise API origin', async () => {
+    const fetch = vi.fn()
+      .mockResolvedValueOnce(response(200, { data: { token: 'jwt-secret' } }))
+      .mockResolvedValueOnce(response(200, [{ id: 'engineering', name: 'Engineering' }]))
+    vi.stubGlobal('fetch', fetch)
+    const test = await mount({ PANUOYUN_JWT: 'existing-jwt' }, {
+      mode: 'enterprise', enterpriseLoginOrigin: 'https://tenant.ainoriahub.com',
+    })
+
+    await test.account.login('member@example.com', 'password-secret')
+    await test.account.groups()
+    expect(fetch).toHaveBeenNthCalledWith(1, 'https://tenant.ainoriahub.com/api/v1/auth/login', expect.any(Object))
+    expect(fetch).toHaveBeenNthCalledWith(2, 'https://api.ainoriahub.com/api/v1/groups/available', expect.any(Object))
+    await test.dispose()
+  })
+
+  it.each([
+    'http://tenant.ainoriahub.com', 'https://ainoriahub.com', 'https://tenant.ainoriahub.com/path',
+    'https://user@tenant.ainoriahub.com', 'https://tenant.ainoriahub.com?next=x',
+    'https://127.0.0.1', 'https://localhost', 'https://tenant.example.com',
+  ])('rejects unsafe enterprise login origin %s', (origin) => {
+    expect(() => enterpriseLoginOrigin(origin)).toThrow(/enterprise login origin/)
+  })
+
+  it('accepts only a canonical HTTPS enterprise subdomain origin', () => {
+    expect(enterpriseLoginOrigin('https://tenant.ainoriahub.com/')).toBe('https://tenant.ainoriahub.com')
   })
 })

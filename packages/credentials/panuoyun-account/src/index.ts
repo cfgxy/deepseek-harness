@@ -1,10 +1,47 @@
 /** Host-only Pa诺云 account and Sub2API key operations. */
-import type { Context } from '@deepseek-ai/cordis'
+import type { Context, Volatile } from '@deepseek-ai/cordis'
+import z from '@deepseek-ai/schemastery'
 import { credentialRef } from '@deepseek-ai/dsh-credentials'
 import { Remote, TypertRemoteService } from '@deepseek-ai/dsh-typert-protocol'
 
-/** Fixed public API origin; the Pa诺云 browser panel is deliberately not an API target. */
-export const PANUOYUN_API_ORIGIN = 'https://api.apinoria.com'
+/** Personal and enterprise Pa诺云 deployments use disjoint fixed API origins. */
+export type PanuoyunMode = 'personal' | 'enterprise'
+/** Personal control and inference origin. */
+export const PANUOYUN_PERSONAL_API_ORIGIN = 'https://api.apinoria.com'
+/** Enterprise control and inference origin, never derived from a login-origin input. */
+export const PANUOYUN_ENTERPRISE_API_ORIGIN = 'https://api.ainoriahub.com'
+/** Pa诺云 configuration stored in the profile's non-secret settings section. */
+export interface Config {
+  /** Personal is the first-run default; enterprise needs a separately validated login origin. */
+  mode: Volatile<PanuoyunMode>
+  /** Enterprise-only origin used exclusively for its login request. */
+  enterpriseLoginOrigin: Volatile<string>
+}
+export const Config = z.object({
+  mode: z.union(['personal', 'enterprise'] as const).default('personal').volatile(),
+  enterpriseLoginOrigin: z.string().default('').volatile(),
+})
+/** Resolve the deployment-controlled API origin. */
+export function apiOriginFor(mode: PanuoyunMode): string {
+  return mode === 'personal' ? PANUOYUN_PERSONAL_API_ORIGIN : PANUOYUN_ENTERPRISE_API_ORIGIN
+}
+/**
+ * Validate the user-provided enterprise login origin before the Host can fetch it.
+ * @param value - non-secret profile setting.
+ * @returns canonical allowed HTTPS origin.
+ */
+export function enterpriseLoginOrigin(value: string): string {
+  let url: URL
+  try { url = new URL(value) } catch { throw new TypeError('Pa诺云 enterprise login origin must be an absolute HTTPS URL') }
+  if (url.protocol !== 'https:' || url.username || url.password || url.search || url.hash
+    || url.pathname !== '/' || url.port || !url.hostname.endsWith('.ainoriahub.com')) {
+    throw new TypeError('Pa诺云 enterprise login origin must be an HTTPS .ainoriahub.com origin without path, credentials, query, fragment, or port')
+  }
+  return url.origin
+}
+
+/** Backward-compatible personal API origin alias. */
+export const PANUOYUN_API_ORIGIN = PANUOYUN_PERSONAL_API_ORIGIN
 /** JWT stays in the Host credential store and is never exposed to the renderer. */
 export const PANUOYUN_JWT_REF = credentialRef('PANUOYUN_JWT')
 /** The one explicit or newly-created key selected for the Harness provider. */
@@ -32,12 +69,14 @@ export class PanuoyunError extends Error {
 /** Host-owned account operations. Every network call is made from this process, never from app://. */
 export class PanuoyunAccount extends TypertRemoteService {
   static inject = ['credentials']
-  constructor(ctx: Context) { super(ctx, 'panuoyunAccount', { namespace: 'panuoyun' }) }
+  static Config = Config
+  constructor(ctx: Context, private readonly config: Config) { super(ctx, 'panuoyunAccount', { namespace: 'panuoyun' }) }
 
-  /** Authenticate with Pa诺云 and replace only the stored JWT after a successful response. */
+  /** Authenticate with the configured Pa诺云 mode and replace only the stored JWT after a successful response. */
   @Remote
   async login(username: string, password: string): Promise<void> {
-    const response = await fetch(`${PANUOYUN_API_ORIGIN}/api/v1/auth/login`, {
+    const connection = this.connection()
+    const response = await fetch(`${connection.loginOrigin}/api/v1/auth/login`, {
       method: 'POST', headers: { accept: 'application/json', 'content-type': 'application/json' },
       body: JSON.stringify({ username, password }),
     })
@@ -93,20 +132,27 @@ export class PanuoyunAccount extends TypertRemoteService {
     await Promise.all([this.ctx.credentials.unset(PANUOYUN_JWT_REF), this.ctx.credentials.unset(PANUOYUN_API_KEY_REF)])
   }
 
+  /** Resolve one operation's fixed API origin and its separately scoped login origin. */
+  private connection(): { apiOrigin: string; loginOrigin: string } {
+    const mode = this.config.mode.get()
+    if (mode === 'personal') return { apiOrigin: PANUOYUN_PERSONAL_API_ORIGIN, loginOrigin: PANUOYUN_PERSONAL_API_ORIGIN }
+    return { apiOrigin: PANUOYUN_ENTERPRISE_API_ORIGIN, loginOrigin: enterpriseLoginOrigin(this.config.enterpriseLoginOrigin.get()) }
+  }
+
   private async authorized(path: string, operation: string, init: RequestInit = {}): Promise<Response> {
     const jwt = await this.ctx.credentials.resolve(PANUOYUN_JWT_REF)
     if (jwt === undefined) throw new PanuoyunError(operation, 401)
     const headers = new Headers(init.headers)
     headers.set('accept', 'application/json')
     headers.set('authorization', `Bearer ${jwt.value}`)
-    const response = await fetch(`${PANUOYUN_API_ORIGIN}${path}`, { ...init, headers })
+    const response = await fetch(`${this.connection().apiOrigin}${path}`, { ...init, headers })
     if (response.status === 401) await this.ctx.credentials.unset(PANUOYUN_JWT_REF)
     if (!response.ok) throw new PanuoyunError(operation, response.status)
     return response
   }
 
   private async requestModels(key: string): Promise<readonly PanuoyunModel[]> {
-    const response = await fetch(`${PANUOYUN_API_ORIGIN}/v1/models`, { headers: { accept: 'application/json', authorization: `Bearer ${key}` } })
+    const response = await fetch(`${this.connection().apiOrigin}/v1/models`, { headers: { accept: 'application/json', authorization: `Bearer ${key}` } })
     if (response.status === 401) await this.ctx.credentials.unset(PANUOYUN_API_KEY_REF)
     if (!response.ok) throw new PanuoyunError('models', response.status)
     const payload: unknown = await response.json().catch(() => undefined)
