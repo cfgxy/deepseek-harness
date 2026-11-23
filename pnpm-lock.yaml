@@ -10061,8 +10061,11 @@ importers:
 
   packages/experimental/enterprise-runtime:
     dependencies:
+      '@deepseek-ai/dsh-util-values':
+        specifier: workspace:*
+        version: link:../../util/values
       '@deepseek-ai/schemastery':
-        specifier: workspace:~
+        specifier: link:../../../vendor/schemastery
         version: link:../../../vendor/schemastery
       yauzl:
         specifier: ^3.4.0
@@ -10087,6 +10090,20 @@ importers:
       '@deepseek-ai/dsh-tools':
         specifier: workspace:*
         version: link:../../core/tools
+
+  packages/experimental/enterprise-runtime-bundle:
+    dependencies:
+      '@deepseek-ai/dsh-experimental-enterprise-runtime':
+        specifier: workspace:*
+        version: link:../enterprise-runtime
+    devDependencies:
+      '@deepseek-ai/cordis':
+        specifier: workspace:~
+        version: link:../../../vendor/cordis
+    peerDependencies:
+      '@deepseek-ai/cordis':
+        specifier: workspace:~
+        version: link:../../../vendor/cordis
 
   packages/experimental/forge:
     dependencies:

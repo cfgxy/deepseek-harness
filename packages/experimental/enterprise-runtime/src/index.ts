@@ -3,6 +3,7 @@
 import { Context, Service } from '@deepseek-ai/cordis'
 import z from '@deepseek-ai/schemastery'
 import { defineTool } from '@deepseek-ai/dsh-tools'
+import type { JsonValue } from '@deepseek-ai/dsh-util-values'
 import { mkdir, readFile, rename, rm, writeFile } from 'node:fs/promises'
 import { randomUUID } from 'node:crypto'
 import { join, relative, resolve } from 'node:path'
@@ -21,19 +22,23 @@ export interface RuntimeManifest {
 /** Optional, independently-owned read-only data source capability. */
 export interface DataSourceApiV1 {
   readonly apiVersion: '1'
-  execute(request: Readonly<{ query: unknown; cursor?: string; limit: number }>, signal: AbortSignal): Promise<Readonly<{ rows: readonly unknown[]; nextCursor?: string }>>
+  execute(
+    request: Readonly<{ query: JsonValue; cursor?: string; limit: number }>,
+    signal: AbortSignal,
+  ): Promise<Readonly<{ rows: readonly JsonValue[]; nextCursor?: string }>>
 }
 
 /** The only template this POC accepts. */
-export interface ListTemplate {
+export interface ListTemplate extends Record<string, JsonValue> {
   readonly kind: 'list'
   readonly title: string
   readonly dataAction?: 'query'
 }
 
-export interface RuntimeResult {
+/** JSON-safe output returned by an active enterprise capability. */
+export interface RuntimeResult extends Record<string, JsonValue> {
   readonly template: ListTemplate
-  readonly rows?: readonly unknown[]
+  readonly rows?: JsonValue[]
   readonly nextCursor?: string
 }
 
@@ -119,14 +124,16 @@ export class EnterpriseRuntimeService extends Service {
       }
       await mkdir(resolve(destination, '..'), { recursive: true })
       await rename(staging, destination)
-      const versions = existing ?? {}
-      versions[manifest.version] = { manifest, entry }
-      this.inventory.packages[manifest.id] = versions
+      const versions = { ...existing, [manifest.version]: { manifest, entry } }
+      this.inventory = {
+        packages: { ...this.inventory.packages, [manifest.id]: versions },
+      }
       try {
         await this.save()
       } catch (error) {
-        delete versions[manifest.version]
-        if (existing === undefined) delete this.inventory.packages[manifest.id]
+        this.inventory = existing === undefined
+          ? { packages: withoutKey(this.inventory.packages, manifest.id) }
+          : { packages: { ...this.inventory.packages, [manifest.id]: existing } }
         await rm(destination, { recursive: true, force: true })
         throw error
       }
@@ -142,8 +149,8 @@ export class EnterpriseRuntimeService extends Service {
    * A registration failure leaves the old model-facing tool and payload unchanged.
    */
   activate(id: string, version: string): void {
-    const stored = this.package(id, version)
-    const next = this.register(id, version, stored.entry)
+    this.package(id, version)
+    const next = this.register(id, version)
     const previous = this.active.get(id)
     this.active.set(id, next)
     previous?.dispose()
@@ -153,7 +160,7 @@ export class EnterpriseRuntimeService extends Service {
   async uninstall(id: string): Promise<void> {
     this.active.get(id)?.dispose()
     this.active.delete(id)
-    delete this.inventory.packages[id]
+    this.inventory = { packages: withoutKey(this.inventory.packages, id) }
     await rm(resolve(this.root, id), { recursive: true, force: true })
     await this.save()
   }
@@ -175,7 +182,7 @@ export class EnterpriseRuntimeService extends Service {
     return { template: item.entry, rows: [...result.rows], ...result.nextCursor === undefined ? {} : { nextCursor: result.nextCursor } }
   }
 
-  private register(id: string, version: string, entry: ListTemplate): ActiveCapability {
+  private register(id: string, version: string): ActiveCapability {
     const toolName = capabilityToolName(id, version)
     const dispose = this.ctx.tools.register(defineTool({
       name: toolName,
@@ -215,6 +222,10 @@ declare module '@deepseek-ai/cordis' {
   }
 }
 
+function withoutKey<T>(record: Record<string, T>, key: string): Record<string, T> {
+  return Object.fromEntries(Object.entries(record).filter(([candidate]) => candidate !== key))
+}
+
 function packageDirectory(root: string, manifest: RuntimeManifest): string {
   return safeDestination(root, `${manifest.id}/${manifest.version}`)
 }
@@ -245,31 +256,63 @@ function parseEntry(raw: Uint8Array | undefined): ListTemplate {
   if (raw === undefined) throw new RuntimeError('entry-missing')
   const value = JSON.parse(Buffer.from(raw).toString('utf8')) as Record<string, unknown>
   if (value.kind !== 'list' || typeof value.title !== 'string' || (value.dataAction !== undefined && value.dataAction !== 'query')) throw new RuntimeError('template-invalid')
-  return value as ListTemplate
+  return {
+    kind: 'list',
+    title: value.title,
+    ...value.dataAction === undefined ? {} : { dataAction: value.dataAction },
+  }
 }
 
 function readZip(zip: Uint8Array, limits: Required<Omit<Config, 'storageDir'>>): Promise<Map<string, Uint8Array>> {
-  return new Promise((resolvePromise, reject) => yauzl.fromBuffer(Buffer.from(zip), { lazyEntries: true, validateEntrySizes: true }, (openError, archive) => {
-    if (openError !== null || archive === undefined) { reject(new RuntimeError(openError?.message.includes('relative path') ? 'unsafe-path' : 'zip-invalid')); return }
-    const files = new Map<string, Uint8Array>()
-    let total = 0
-    let count = 0
-    archive.on('entry', entry => {
-      try {
-        safeDestination('/', entry.fileName)
-        if (files.has(entry.fileName)) throw new RuntimeError('duplicate-zip-member')
-        if (++count > limits.maxFiles || (total += entry.uncompressedSize) > limits.maxUnpackedBytes) throw new RuntimeError('zip-limits-exceeded')
-        archive.openReadStream(entry, (streamError, stream) => {
-          if (streamError !== null || stream === undefined) { archive.close(); reject(streamError); return }
-          const chunks: Buffer[] = []
-          stream.on('data', chunk => chunks.push(chunk))
-          stream.on('end', () => { files.set(entry.fileName, Buffer.concat(chunks)); archive.readEntry() })
-          stream.on('error', error => { archive.close(); reject(error) })
+  return new Promise((resolvePromise, reject) => {
+    yauzl.fromBuffer(
+      Buffer.from(zip),
+      { lazyEntries: true, validateEntrySizes: true },
+      (openError, archive) => {
+        if (openError !== null || archive === undefined) {
+          const code = openError?.message.includes('relative path') ? 'unsafe-path' : 'zip-invalid'
+          reject(new RuntimeError(code))
+          return
+        }
+        const files = new Map<string, Uint8Array>()
+        let total = 0
+        let count = 0
+        archive.on('entry', (entry) => {
+          try {
+            safeDestination('/', entry.fileName)
+            if (files.has(entry.fileName)) throw new RuntimeError('duplicate-zip-member')
+            if (++count > limits.maxFiles || (total += entry.uncompressedSize) > limits.maxUnpackedBytes) {
+              throw new RuntimeError('zip-limits-exceeded')
+            }
+            archive.openReadStream(entry, (streamError, stream) => {
+              if (streamError !== null || stream === undefined) {
+                archive.close()
+                reject(streamError)
+                return
+              }
+              const chunks: Buffer[] = []
+              stream.on('data', chunk => chunks.push(chunk))
+              stream.on('end', () => {
+                files.set(entry.fileName, Buffer.concat(chunks))
+                archive.readEntry()
+              })
+              stream.on('error', (error) => {
+                archive.close()
+                reject(error)
+              })
+            })
+          } catch (error) {
+            archive.close()
+            reject(error)
+          }
         })
-      } catch (error) { archive.close(); reject(error) }
-    })
-    archive.on('end', () => resolvePromise(files))
-    archive.on('error', error => reject(new RuntimeError(error.message.includes('relative path') ? 'unsafe-path' : 'zip-invalid')))
-    archive.readEntry()
-  }))
+        archive.on('end', () => resolvePromise(files))
+        archive.on('error', (error) => {
+          const code = error.message.includes('relative path') ? 'unsafe-path' : 'zip-invalid'
+          reject(new RuntimeError(code))
+        })
+        archive.readEntry()
+      },
+    )
+  })
 }

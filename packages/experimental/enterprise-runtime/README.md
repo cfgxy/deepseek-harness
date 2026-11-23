@@ -17,7 +17,7 @@ A second-level ZIP contains `manifest.json` with `id`, `version`, `runtimeApi`, 
 
 Activation registers the candidate before disposing the previous active registration. A failed candidate leaves the previous active registration intact. Process restart reloads inventory but intentionally does not automatically activate capabilities.
 
-Each active package is registered as a real Harness `ctx.tools` tool; disposing, replacing or uninstalling it removes that registration. `DataSourceApi@v1` is discovered only through the optional public Cordis service key `dataSourceApi` (`apiVersion: "1"`), and is not provided by this package. A template declaring `dataAction: "query"` returns `data-source-unavailable` until an independently-owned provider exists.
+Each active package is registered as a real Harness `ctx.tools` tool; disposing, replacing or uninstalling it removes that registration. `DataSourceApi@v1` is discovered only through the optional public Cordis service key `dataSourceApi` (`apiVersion: "1"`), and is not provided by this package. Its query and row values must be lossless JSON so the model-facing tool result remains durable. A template declaring `dataAction: "query"` returns `data-source-unavailable` until an independently-owned provider exists.
 
 ## Known Limitations and Deferred Work
 
