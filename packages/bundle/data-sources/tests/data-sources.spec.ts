@@ -99,6 +99,25 @@ describe('read-only data source supervisor', () => {
     })).rejects.toThrow('outside source')
   })
 
+  it('permits a local child path when the configured root is slash', async () => {
+    const root = { ...source('local-directory'), policy: { maxBytes: 1024, maxRows: 10, allowedPath: '/' } }
+    const supervisor = new ConnectorSupervisor([root], [connector('local-directory')], { resolve: async () => undefined })
+    await expect(supervisor.execute({
+      apiVersion: 'v1', sourceId: root.id, operation: 'directory.list', input: { path: '/fixtures/allowed/' },
+    })).resolves.toMatchObject({ data: { kind: 'local-directory' } })
+  })
+
+  it.each(['INTO OUTFILE', 'INTO DUMPFILE'])('rejects MySQL SELECT %s writes before connector dispatch', async (clause) => {
+    const execute = vi.fn(connector('mysql').execute)
+    const supervisor = new ConnectorSupervisor([source('mysql')], [{ kind: 'mysql', probe: async () => {}, execute }], {
+      resolve: async () => ({ value: 'fixture-secret' }),
+    })
+    await expect(supervisor.execute({
+      apiVersion: 'v1', sourceId: 'mysql', operation: 'sql.query', input: { sql: `SELECT 1 ${clause} '/tmp/fixture'` },
+    })).rejects.toThrow('only one SELECT')
+    expect(execute).not.toHaveBeenCalled()
+  })
+
   it('rejects a source-kind operation that could imply a write-capable adapter command', async () => {
     const supervisor = new ConnectorSupervisor([source('s3')], [connector('s3')], { resolve: async () => ({ value: 'fixture-secret' }) })
     await expect(supervisor.execute({

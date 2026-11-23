@@ -2,7 +2,7 @@ import { posix } from 'node:path'
 import type { ReadOperation, ReadRequest, SourceConfig } from './types.ts'
 
 const SQL_READ = /^(?:select|with|explain|show)\b/i
-const SQL_WRITE = /\b(?:insert|update|delete|merge|alter|drop|create|grant|revoke|copy|call)\b/i
+const SQL_WRITE = /\b(?:insert|update|delete|merge|alter|drop|create|grant|revoke|copy|call)\b|\binto\s+(?:outfile|dumpfile)\b/i
 
 function stringInput(input: Record<string, unknown>, field: string): string {
   const value = input[field]
@@ -21,6 +21,7 @@ function allowedPath(source: SourceConfig, candidate: string): boolean {
   if (root === undefined) return false
   const normalizedRoot = posix.normalize(root)
   const normalizedCandidate = posix.normalize(candidate)
+  if (normalizedRoot === '/') return normalizedCandidate.startsWith('/')
   return normalizedCandidate === normalizedRoot || normalizedCandidate.startsWith(`${normalizedRoot}/`)
 }
 
