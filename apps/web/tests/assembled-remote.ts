@@ -126,6 +126,33 @@ const imageIterateSchema = {
   },
 } as const
 
+const dataSourcesSchema = {
+  uid: 148,
+  refs: {
+    97: { type: 'number', meta: { step: 1, min: 1, required: true } },
+    101: { type: 'number', meta: { step: 1, min: 1, required: true } },
+    102: { type: 'string', meta: {} }, 103: { type: 'string', meta: {} },
+    106: { type: 'string', meta: { required: true } }, 108: { type: 'string', meta: { required: true } },
+    111: { type: 'const', meta: { required: true }, value: 'local-directory' },
+    113: { type: 'const', meta: { required: true }, value: 's3' },
+    115: { type: 'const', meta: { required: true }, value: 'sftp' },
+    117: { type: 'const', meta: { required: true }, value: 'mysql' },
+    119: { type: 'const', meta: { required: true }, value: 'postgresql' },
+    120: { type: 'union', meta: { required: true }, list: [111, 113, 115, 117, 119] },
+    122: { type: 'string', meta: { required: true } }, 124: { type: 'boolean', meta: { default: true } },
+    125: { type: 'string', meta: {} }, 126: { type: 'string', meta: {} }, 127: { type: 'string', meta: {} },
+    128: { type: 'string', meta: {} }, 129: { type: 'string', meta: {} },
+    133: { type: 'number', meta: { step: 1, min: 1, max: 65535 } }, 134: { type: 'string', meta: {} },
+    135: { type: 'string', meta: {} }, 138: { type: 'number', meta: { step: 1, min: 1 } },
+    141: { type: 'number', meta: { step: 1, min: 1 } },
+    143: { type: 'object', meta: { default: {} }, dict: { endpoint: 126, bucket: 127, region: 128, host: 129, port: 133, database: 134, knownHostsPath: 135, timeoutMs: 138, statementTimeoutMs: 141 } },
+    144: { type: 'object', meta: { default: {}, required: true }, dict: { maxBytes: 97, maxRows: 101, allowedPath: 102, allowedPrefix: 103 } },
+    145: { type: 'object', meta: { default: {} }, dict: { id: 106, revision: 108, kind: 120, label: 122, enabled: 124, credentialRef: 125, connection: 143, policy: 144 } },
+    147: { type: 'array', meta: { default: [] }, inner: 145 },
+    148: { type: 'object', meta: { default: {} }, dict: { sources: 147 } },
+  },
+} as const
+
 export interface AssembledRemoteOptions {
   /** Override the schema-resolved Host preference for developer-tool scenarios. */
   readonly developerTools?: boolean
@@ -151,6 +178,12 @@ export interface AssembledRemoteOptions {
     readonly rejectedCredentialDescriptions?: readonly string[]
     /** Delay a credential write so the assembled client can observe its saving state. */
     readonly credentialSetDelayMs?: number
+  }
+  /** Stateful data-source settings for an assembled client composition. */
+  readonly dataSources?: {
+    readonly writable?: boolean
+    readonly mutationsAccepted?: boolean
+    readonly sources?: readonly unknown[]
   }
 }
 
@@ -225,6 +258,15 @@ export function createAssembledRemote(options: AssembledRemoteOptions = {}): Ass
       user: {} as Record<string, unknown>,
       credentials: new Set(options.imageIterate.configuredCredentials ?? []),
     }
+  const dataSources = options.dataSources === undefined
+    ? undefined
+    : {
+      writable: options.dataSources.writable ?? true,
+      mutationsAccepted: options.dataSources.mutationsAccepted ?? true,
+      revision: 0,
+      base: { sources: structuredClone(options.dataSources.sources ?? []) },
+      user: {} as Record<string, unknown>,
+    }
   const credentialDescriptionGates = new Map<string, PromiseWithResolvers<undefined>>()
   const credentialDescriptionSettled = new Map<string, number>()
 
@@ -268,6 +310,16 @@ export function createAssembledRemote(options: AssembledRemoteOptions = {}): Ass
     }
   }
 
+  const dataSourcesView = () => {
+    if (dataSources === undefined) return undefined
+    return {
+      ns: 'data-sources', schema: dataSourcesSchema,
+      value: { ...dataSources.base, ...dataSources.user }, base: dataSources.base,
+      ...Object.keys(dataSources.user).length === 0 ? {} : { user: dataSources.user },
+      autoGenerate: false, applies: 'live', secrets: [], revision: dataSources.revision,
+    }
+  }
+
   const settingsDescribe = () => ok({
     ...fixture.settingsDescribe.value,
     namespaces: [
@@ -278,6 +330,7 @@ export function createAssembledRemote(options: AssembledRemoteOptions = {}): Ass
         value: { enabled: options.developerTools ?? true }, autoGenerate: false, applies: 'live', secrets: [], revision: 0,
       },
       ...(imageIterateView() === undefined ? [] : [imageIterateView()]),
+      ...(dataSourcesView() === undefined ? [] : [dataSourcesView()]),
     ],
   })
 
@@ -334,11 +387,31 @@ export function createAssembledRemote(options: AssembledRemoteOptions = {}): Ass
     return gates.length === 0 ? reply() : Promise.all(gates).then(reply)
   })
   mock.unary('settings/mutate', (...args: unknown[]) => {
-    if (imageIterate === undefined) throw new Error('assembled fixture image settings are not enabled')
     const request = args[0]
     const ns = isRecord(request) ? request.ns : undefined
     const ops = isRecord(request) ? request.ops : undefined
     const expectedRevision = isRecord(request) ? request.expectedRevision : undefined
+    if (ns === 'data-sources') {
+      if (dataSources === undefined || !Array.isArray(ops) || typeof expectedRevision !== 'number') {
+        throw new TypeError('assembled fixture data-sources settings mutation is invalid')
+      }
+      if (!dataSources.writable || !dataSources.mutationsAccepted || expectedRevision !== dataSources.revision) {
+        return rejected('settings/rejected', 'assembled fixture did not accept the settings write')
+      }
+      for (const operation of ops) {
+        if (!isRecord(operation) || operation.op !== 'set' || !Array.isArray(operation.path)
+          || operation.path.length !== 1 || operation.path[0] !== 'sources') {
+          throw new TypeError('assembled fixture data-sources settings operation is invalid')
+        }
+        dataSources.user.sources = operation.value
+      }
+      dataSources.revision++
+      const view = dataSourcesView()
+      if (view === undefined) throw new Error('assembled fixture data-sources settings unexpectedly disappeared')
+      mock.streams.push('$events', { type: 'emit', event: 'settings/document-updated', args: ['data-sources', dataSources.revision] })
+      return ok(view)
+    }
+    if (imageIterate === undefined) throw new Error('assembled fixture image settings are not enabled')
     if (ns !== 'image-iterate-plugin' || !Array.isArray(ops) || typeof expectedRevision !== 'number') {
       throw new TypeError('assembled fixture image settings mutation is invalid')
     }

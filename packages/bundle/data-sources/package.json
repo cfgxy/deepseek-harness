@@ -61,6 +61,7 @@
     }
   },
   "scripts": {
-    "test": "node --test test/*.test.mjs"
+    "test": "node --test test/*.test.mjs",
+    "test:composition": "pnpm -C ../../.. exec vitest run --config vitest.web.config.ts apps/web/tests/data-sources-client.e2e.ts"
   }
 }

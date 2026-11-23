@@ -34,8 +34,12 @@ test('client registers a credential-safe settings page and releases every lifeti
         status: 'ready', writable: true, value: {
           sources: [{
             id: 'fixture', revision: '1', kind: 'mysql', label: 'Fixture DB', credentialRef: 'DB_READONLY',
-            connection: { host: 'db.fixture.test', password: 'must-not-render', tls: { rejectUnauthorized: true } },
-            policy: { maxBytes: 1024, maxRows: 10 }, secret: 'must-not-render',
+            connection: {
+              host: 'db.fixture.test', password: 'must-not-render', token: 'token-value', apiKey: 'api-key-value',
+              authorization: 'authorization-value', keyMaterial: 'key-material-value', nested: { value: 'neutral-secret-value' },
+            },
+            policy: { maxBytes: 1024, maxRows: 10 }, secret: 'must-not-render', token: 'token-value', apiKey: 'api-key-value',
+            authorization: 'authorization-value', keyMaterial: 'key-material-value', neutral: { value: 'neutral-secret-value' }, tls: { rejectUnauthorized: false },
           }],
         },
       }
@@ -60,19 +64,25 @@ test('client registers a credential-safe settings page and releases every lifeti
   const state = face.hooks.dataSourcesSettings.getSnapshot()
   const projection = JSON.stringify(state)
   assert.match(projection, /DB_READONLY/)
-  assert.doesNotMatch(projection, /must-not-render/)
+  for (const secret of ['must-not-render', 'token-value', 'api-key-value', 'authorization-value', 'key-material-value', 'neutral-secret-value']) {
+    assert.doesNotMatch(projection, new RegExp(secret))
+  }
   assert.equal(typeof face.test, 'function')
   const rendered = page.component({
     view: 'detail', t: key => key, ...face,
     useDataSourcesSettings(select) { return select(state) },
   })
   assert.match(JSON.stringify(rendered), /credentialRef/)
-  assert.doesNotMatch(JSON.stringify(rendered), /must-not-render/)
+  for (const secret of ['must-not-render', 'token-value', 'api-key-value', 'authorization-value', 'key-material-value', 'neutral-secret-value']) {
+    assert.doesNotMatch(JSON.stringify(rendered), new RegExp(secret))
+  }
   face.save({ ...state.sources[0], label: 'Renamed fixture' })
   await new Promise(resolve => setImmediate(resolve))
   const saved = JSON.stringify(writes)
-  assert.match(saved, /rejectUnauthorized/)
-  assert.doesNotMatch(saved, /must-not-render/)
+  assert.doesNotMatch(saved, /rejectUnauthorized/)
+  for (const secret of ['must-not-render', 'token-value', 'api-key-value', 'authorization-value', 'key-material-value', 'neutral-secret-value']) {
+    assert.doesNotMatch(saved, new RegExp(secret))
+  }
   face.test('fixture')
   assert.match(face.hooks.dataSourcesSettings.getSnapshot().probes.fixture.message, /unavailable/)
 

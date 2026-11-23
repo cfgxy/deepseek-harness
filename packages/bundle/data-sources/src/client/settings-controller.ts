@@ -54,24 +54,10 @@ const kinds: readonly SourceKind[] = ['local-directory', 's3', 'sftp', 'mysql', 
 const text = (value: unknown): string => typeof value === 'string' ? value : ''
 const integer = (value: unknown): string => typeof value === 'number' && Number.isInteger(value) ? String(value) : ''
 
-/** Normalize an unknown source before it can reach a rendered prop. */
-function rawSource(value: unknown): Record<string, unknown> | undefined {
-  return typeof value === 'object' && value !== null && !Array.isArray(value) ? value as Record<string, unknown> : undefined
-}
-
-/** Keep forward-compatible non-secret options, but refuse to relay secret-shaped values through the browser. */
-function withoutSecrets(value: unknown): unknown {
-  if (Array.isArray(value)) return value.map(withoutSecrets)
-  const record = rawSource(value)
-  if (record === undefined) return value
-  return Object.fromEntries(Object.entries(record)
-    .filter(([key]) => !/(?:secret|password|private.?key|access.?key|credential(?!ref))/iu.test(key))
-    .map(([key, item]) => [key, withoutSecrets(item)]))
-}
-
+/** Read an object only long enough to copy its explicit public fields. */
 function sourceDraft(value: unknown): DataSourceDraft | undefined {
-  const source = rawSource(value)
-  if (source === undefined) return undefined
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) return undefined
+  const source = value as Record<string, unknown>
   if (!kinds.includes(source.kind as SourceKind)) return undefined
   const connection = typeof source.connection === 'object' && source.connection !== null && !Array.isArray(source.connection)
     ? source.connection as Record<string, unknown> : {}
@@ -98,12 +84,8 @@ function requiredInteger(value: string, fallback: number): number {
   return Number.isInteger(parsed) && parsed > 0 ? parsed : fallback
 }
 
-/** Create an allowed Host config value without copying arbitrary (including secret) fields. */
-function serialise(source: DataSourceDraft, existing: Record<string, unknown> = {}): Record<string, unknown> {
-  const preserved = withoutSecrets(existing) as Record<string, unknown>
-  const { credentialRef: _oldCredentialRef, ...safePreserved } = preserved
-  const preservedConnection = rawSource(safePreserved.connection) ?? {}
-  const preservedPolicy = rawSource(safePreserved.policy) ?? {}
+/** Create the complete allowlisted Host config value. */
+function serialise(source: DataSourceDraft): Record<string, unknown> {
   const connection = {
     endpoint: source.connection.endpoint.trim(), bucket: source.connection.bucket.trim(), region: source.connection.region.trim(),
     host: source.connection.host.trim(), port: requiredInteger(source.connection.port, 0), database: source.connection.database.trim(),
@@ -115,11 +97,10 @@ function serialise(source: DataSourceDraft, existing: Record<string, unknown> = 
     allowedPath: source.policy.allowedPath.trim(), allowedPrefix: source.policy.allowedPrefix.trim(),
   }
   return {
-    ...safePreserved,
     id: source.id.trim(), revision: source.revision.trim(), kind: source.kind, label: source.label.trim(), enabled: source.enabled,
     ...(source.credentialRef.trim() === '' ? {} : { credentialRef: source.credentialRef.trim() }),
-    connection: { ...preservedConnection, ...Object.fromEntries(Object.entries(connection).filter(([, value]) => value !== '' && value !== 0)) },
-    policy: { ...preservedPolicy, ...Object.fromEntries(Object.entries(policy).filter(([, value]) => value !== '')) },
+    connection: Object.fromEntries(Object.entries(connection).filter(([, value]) => value !== '' && value !== 0)),
+    policy: Object.fromEntries(Object.entries(policy).filter(([, value]) => value !== '')),
   }
 }
 
@@ -143,19 +124,12 @@ export class DataSourcesSettingsController {
     this.unsubscribe = scope.subscribe(() => { this.publish() })
   }
 
-  private rawSources(): readonly Record<string, unknown>[] {
+  private sources(): readonly DataSourceDraft[] {
     const value = this.scope.getSnapshot().value?.sources
     return Array.isArray(value) ? value.flatMap((item) => {
-      const source = rawSource(item)
-      return source === undefined ? [] : [source]
-    }) : []
-  }
-
-  private sources(): readonly DataSourceDraft[] {
-    return this.rawSources().flatMap((item) => {
       const source = sourceDraft(item)
       return source === undefined ? [] : [source]
-    })
+    }) : []
   }
 
   private projection(): DataSourcesCardState {
@@ -167,10 +141,10 @@ export class DataSourcesSettingsController {
 
   private save(source: DataSourceDraft): void {
     let replaced = false
-    const sources = this.rawSources().map((current) => {
-      if (sourceDraft(current)?.id !== source.id) return withoutSecrets(current)
+    const sources = this.sources().map((current) => {
+      if (current.id !== source.id) return serialise(current)
       replaced = true
-      return serialise(source, current)
+      return serialise(source)
     })
     if (!replaced) sources.push(serialise(source))
     void this.scope.mutate([{ op: 'set', path: ['sources'], value: sources }]).then(() => this.publish())
