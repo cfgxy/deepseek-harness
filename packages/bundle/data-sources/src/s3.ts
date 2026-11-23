@@ -63,6 +63,16 @@ export class S3Connector implements ReadConnector {
     const signing = hmac(hmac(hmac(hmac(`AWS4${credentials.secretAccessKey}`, date), region), 's3'), 'aws4_request')
     const signature = createHmac('sha256', signing).update(`AWS4-HMAC-SHA256\n${stamp}\n${scope}\n${sha(canonical)}`).digest('hex')
     headers.authorization = `AWS4-HMAC-SHA256 Credential=${credentials.accessKeyId}/${scope}, SignedHeaders=${signed.join(';')}, Signature=${signature}`
-    return fetch(url, { headers })
+    const timeout = request.source.connection?.timeoutMs ?? 10_000
+    const controller = new AbortController()
+    const timer = setTimeout(() => controller.abort(), timeout)
+    try {
+      return await fetch(url, { headers, signal: controller.signal })
+    } catch (error) {
+      if (controller.signal.aborted) throw new Error(`data-sources: S3 operation timed out after ${timeout}ms`)
+      throw error
+    } finally {
+      clearTimeout(timer)
+    }
   }
 }

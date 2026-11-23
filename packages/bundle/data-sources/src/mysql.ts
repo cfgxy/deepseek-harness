@@ -15,7 +15,11 @@ export class MysqlConnector implements ReadConnector {
   async probe(request: Omit<ConnectorRequest, 'request'>): Promise<void> { await this.#query(request, 'SELECT 1') }
   async execute(request: ConnectorRequest): Promise<Omit<ReadResult, 'source' | 'evidence'>> { const sql = request.request.operation === 'catalog' ? 'SHOW TABLES' : String(request.request.input.sql); const result = await this.#query(request, sql); const resultRows = bounded(result.rows, request.request.maxBytes!, request.request.maxRows!); return { data: { columns: result.columns, rows: resultRows.rows }, truncated: resultRows.truncated } }
   async #query(request: Omit<ConnectorRequest, 'request'> | ConnectorRequest, sql: string): Promise<{ columns: string[]; rows: unknown[][] }> {
-    const credential = auth(request.credential); const { host, port = 3306, database } = request.source.connection!; const socket = net.createConnection({ host, port }); let buffer = Buffer.alloc(0); const columns: string[] = []; const rows: unknown[][] = []; let expectedColumns = 0; let readyForRows = false
+    const credential = auth(request.credential); const { host, port = 3306, database } = request.source.connection!
+    const socket = net.createConnection({ host, port })
+    const timeout = request.source.connection?.timeoutMs ?? 10_000
+    socket.setTimeout(timeout, () => socket.destroy(new Error(`data-sources: MySQL operation timed out after ${timeout}ms`)))
+    let buffer = Buffer.alloc(0); const columns: string[] = []; const rows: unknown[][] = []; let expectedColumns = 0; let readyForRows = false
     const send = (body: Buffer, seq: number) => socket.write(packet(body, seq))
     let waiter: ((value: Buffer) => void) | undefined
     const take = (): Buffer | undefined => { if (buffer.length < 4) return undefined; const n = buffer.readUIntLE(0, 3); if (buffer.length < n + 4) return undefined; const body = buffer.subarray(4, n + 4); buffer = buffer.subarray(n + 4); return body }

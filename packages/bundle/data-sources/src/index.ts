@@ -32,9 +32,10 @@ export const Config: z<Config> = z.object({
     kind: z.union(['local-directory', 's3', 'sftp', 'mysql', 'postgresql'] as const).required(),
     label: z.string().required(),
     enabled: z.boolean().default(true),
+    credentialRef: z.string(),
     connection: z.object({
       endpoint: z.string(), bucket: z.string(), region: z.string(), host: z.string(), port: z.number().step(1).min(1).max(65535),
-      database: z.string(), knownHostsPath: z.string(),
+      database: z.string(), knownHostsPath: z.string(), timeoutMs: z.number().step(1).min(1), statementTimeoutMs: z.number().step(1).min(1),
     }).default({}),
     policy: Policy.required(),
   })).default([]),

@@ -25,7 +25,13 @@ export class PostgreSqlConnector implements ReadConnector {
   }
   async #query(request: Omit<ConnectorRequest, 'request'> | ConnectorRequest, sql: string): Promise<{ columns: string[]; rows: unknown[][] }> {
     const { host, port = 5432, database } = request.source.connection!; const credential = auth(request.credential)
-    const socket = net.createConnection({ host, port }); let buffer = Buffer.alloc(0); let ready = false; let columns: string[] = []; const rows: unknown[][] = []
+    const socket = net.createConnection({ host, port })
+    const timeout = request.source.connection?.timeoutMs ?? 10_000
+    socket.setTimeout(timeout, () => socket.destroy(new Error(`data-sources: PostgreSQL operation timed out after ${timeout}ms`)))
+    let buffer = Buffer.alloc(0)
+    let ready = false
+    let columns: string[] = []
+    const rows: unknown[][] = []
     await new Promise<void>((resolve, reject) => { socket.once('connect', resolve); socket.once('error', reject) })
     const startup = Buffer.concat([Buffer.from([0, 0, 0, 0, 0, 3, 0, 0]), cstring('user'), cstring(credential.username), cstring('database'), cstring(database!), Buffer.from([0])]); startup.writeUInt32BE(startup.length)
     socket.write(startup)

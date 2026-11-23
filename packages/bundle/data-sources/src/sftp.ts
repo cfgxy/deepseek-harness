@@ -48,11 +48,19 @@ export class SftpConnector implements ReadConnector {
     try {
       await writeFile(keyFile, privateKey, { mode: 0o600 })
       const { stdout } = await new Promise<{ stdout: string }>((resolve, reject) => {
-        const child = spawn('sftp', ['-q', '-P', String(port), '-o', 'BatchMode=yes', '-o', 'StrictHostKeyChecking=yes', '-o', `UserKnownHostsFile=${knownHostsPath}`, '-i', keyFile, `${username}@${host}`])
+        const child = spawn('sftp', ['-q', '-P', String(port), '-o', 'BatchMode=yes', '-o', 'StrictHostKeyChecking=yes', '-o', `UserKnownHostsFile=${knownHostsPath}`, '-i', keyFile, `${username}@${host}`], {
+          env: { PATH: process.env.PATH ?? '' },
+        })
+        const timeout = request.source.connection?.timeoutMs ?? 10_000
+        const timer = setTimeout(() => child.kill('SIGKILL'), timeout)
         let stdout = ''; let stderr = ''
         child.stdout.setEncoding('utf8'); child.stdout.on('data', (data) => { stdout += data })
         child.stderr.setEncoding('utf8'); child.stderr.on('data', (data) => { stderr += data })
-        child.once('error', reject); child.once('close', code => code === 0 ? resolve({ stdout }) : reject(new Error(stderr || `exit ${code}`)))
+        child.once('error', reject); child.once('close', (code) => {
+          clearTimeout(timer)
+          if (code === 0) resolve({ stdout })
+          else reject(new Error(stderr || `exit ${code}`))
+        })
         child.stdin.end(`${command}\nquit\n`)
       })
       return stdout

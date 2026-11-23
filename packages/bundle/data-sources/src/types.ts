@@ -20,6 +20,10 @@ export interface SourceConnection {
   port?: number
   database?: string
   knownHostsPath?: string
+  /** Connection deadline in milliseconds; defaults to 10 seconds when omitted. */
+  timeoutMs?: number
+  /** Per-statement database deadline in milliseconds; defaults to connection deadline. */
+  statementTimeoutMs?: number
 }
 export interface SourceConfig {
   id: string
@@ -62,5 +66,12 @@ export function assertSourceConfig(source: SourceConfig): void {
   if (source.kind === 'sftp' && (source.policy.allowedPath === undefined || !source.policy.allowedPath.startsWith('/') || source.policy.allowedPrefix !== undefined || !host(source) || !source.connection?.knownHostsPath)) throw new Error(`data-sources: source ${source.id} requires host, knownHostsPath, and absolute allowedPath`)
   if (source.kind === 's3' && (source.policy.allowedPrefix === undefined || source.policy.allowedPrefix.trim() === '' || source.policy.allowedPath !== undefined || !endpoint(source) || !source.connection?.bucket)) throw new Error(`data-sources: source ${source.id} requires endpoint, bucket, and allowedPrefix only`)
   if ((source.kind === 'mysql' || source.kind === 'postgresql') && (source.policy.allowedPath !== undefined || source.policy.allowedPrefix !== undefined || !host(source) || !source.connection?.database)) throw new Error(`data-sources: source ${source.id} requires host and database without a path policy`)
-  if (source.connection?.port !== undefined && (!Number.isInteger(source.connection.port) || source.connection.port < 1 || source.connection.port > 65535)) throw new Error(`data-sources: source ${source.id} has an invalid port`)
+  if (source.connection?.port !== undefined && (!Number.isInteger(source.connection.port) || source.connection.port < 1 || source.connection.port > 65535)) {
+    throw new Error(`data-sources: source ${source.id} has an invalid port`)
+  }
+  for (const [field, value] of [['timeoutMs', source.connection?.timeoutMs], ['statementTimeoutMs', source.connection?.statementTimeoutMs]] as const) {
+    if (value !== undefined && (!Number.isInteger(value) || value < 1 || value > 120_000)) {
+      throw new Error(`data-sources: source ${source.id} has an invalid ${field}`)
+    }
+  }
 }

@@ -2,6 +2,7 @@ import { mkdtemp, mkdir, rm, symlink, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { describe, expect, it, vi } from 'vitest'
+import { Config as BundleConfig } from '../src/index.ts'
 import { LocalDirectoryConnector } from '../src/local-directory.ts'
 import { ConnectorSupervisor, type ConnectorRequest, type ReadConnector } from '../src/supervisor.ts'
 import type { ReadOperation, SourceConfig, SourceKind } from '../src/types.ts'
@@ -54,6 +55,13 @@ function connector(kind: SourceKind): ReadConnector {
 }
 
 describe('read-only data source supervisor', () => {
+  it('retains credentialRef when the Loader schema constructs external source configuration', () => {
+    const parsed = new BundleConfig({ sources: [{
+      ...source('postgresql'), credentialRef: 'DATA_SOURCE_TEST',
+    }] })
+    expect(parsed.sources[0]?.credentialRef).toBe('DATA_SOURCE_TEST')
+  })
+
   it.each(kinds)('executes the %s fixture read through its matching connector', async (kind) => {
     const resolver = { resolve: vi.fn(async () => ({ value: 'fixture-secret' })) }
     const supervisor = new ConnectorSupervisor([source(kind)], [connector(kind)], resolver)
