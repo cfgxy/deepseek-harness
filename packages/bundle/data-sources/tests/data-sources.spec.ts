@@ -1,16 +1,23 @@
-import { mkdtemp, mkdir, rm, symlink, writeFile } from 'node:fs/promises'
+import { mkdtemp, mkdir, readFile, rm, symlink, writeFile } from 'node:fs/promises'
+import { execFile } from 'node:child_process'
+import { promisify } from 'node:util'
+import tls from 'node:tls'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { createServer } from 'node:net'
+import https from 'node:https'
 import { describe, expect, it, vi } from 'vitest'
 import { Context } from '@deepseek-ai/cordis'
 import { Config as BundleConfig, DataSourcesRemote } from '../src/index.ts'
 import { LocalDirectoryConnector } from '../src/local-directory.ts'
+import { MysqlConnector } from '../src/mysql.ts'
+import { S3Connector } from '../src/s3.ts'
 import { PostgreSqlConnector } from '../src/postgresql.ts'
 import { ConnectorSupervisor, type ConnectorRequest, type ReadConnector } from '../src/supervisor.ts'
 import type { ReadOperation, SourceConfig, SourceKind } from '../src/types.ts'
 
 const kinds: readonly SourceKind[] = ['local-directory', 's3', 'sftp', 'mysql', 'postgresql']
+const execFileAsync = promisify(execFile)
 
 function source(kind: SourceKind): SourceConfig {
   const connection = kind === 's3'
@@ -55,6 +62,38 @@ function connector(kind: SourceKind): ReadConnector {
       }
     },
   }
+}
+
+function mysqlPacket(payload: Buffer, sequence: number): Buffer {
+  const header = Buffer.alloc(4)
+  header.writeUIntLE(payload.length, 0, 3)
+  header[3] = sequence
+  return Buffer.concat([header, payload])
+}
+
+function mysqlHello(capabilities: number): Buffer {
+  const seed = Buffer.from('123456789012345678901')
+  const low = Buffer.alloc(2); low.writeUInt16LE(capabilities & 0xffff)
+  const high = Buffer.alloc(2); high.writeUInt16LE(capabilities >>> 16)
+  const connectionId = Buffer.alloc(4); connectionId.writeUInt32LE(1)
+  return Buffer.concat([
+    Buffer.from([10]), Buffer.from('8.0.0\0'), connectionId, seed.subarray(0, 8), Buffer.from([0]), low,
+    Buffer.from([45]), Buffer.alloc(2), high, Buffer.from([21]), Buffer.alloc(10), seed.subarray(8), Buffer.from('mysql_native_password\0'),
+  ])
+}
+
+async function selfSigned(root: string): Promise<{ key: string; cert: string }> {
+  const key = join(root, 'key.pem'); const cert = join(root, 'cert.pem')
+  await execFileAsync('openssl', ['req', '-x509', '-newkey', 'rsa:2048', '-nodes', '-keyout', key, '-out', cert, '-subj', '/CN=localhost', '-days', '1'])
+  return { key, cert }
+}
+
+function listen(server: ReturnType<typeof createServer>): Promise<number> {
+  return new Promise(resolve => server.listen(0, '127.0.0.1', () => {
+    const address = server.address()
+    if (address === null || typeof address === 'string') throw new Error('fixture server has no TCP port')
+    resolve(address.port)
+  }))
 }
 
 describe('read-only data source supervisor', () => {
@@ -209,6 +248,69 @@ describe('read-only data source supervisor', () => {
         .rejects.toThrow('protocol message exceeds the memory limit')
     } finally {
       await new Promise<void>((resolve, reject) => server.close(error => error === undefined ? resolve() : reject(error)))
+    }
+  })
+
+  it('refuses MySQL TLS downgrade when the server did not negotiate TLS', async () => {
+    const server = createServer(socket => socket.end(mysqlPacket(mysqlHello(0x00000200 | 0x00008000 | 0x00080000), 0)))
+    const port = await listen(server)
+    try {
+      const mysql: SourceConfig = {
+        ...source('mysql'),
+        connection: { host: '127.0.0.1', port, database: 'fixture', timeoutMs: 1_000, tls: { serverName: 'localhost' } },
+      }
+      await expect(new MysqlConnector().probe({ source: mysql, credential: JSON.stringify({ username: 'fixture', password: 'fixture' }) }))
+        .rejects.toThrow('does not support required TLS')
+    } finally {
+      await new Promise<void>((resolve, reject) => server.close(error => error === undefined ? resolve() : reject(error)))
+    }
+  })
+
+  it('uses platform HTTPS certificate validation for S3 endpoints', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'dsh-s3-tls-'))
+    const { key, cert } = await selfSigned(root)
+    const [keyPem, certPem] = await Promise.all([readFile(key), readFile(cert)])
+    let handled = false
+    const server = https.createServer({ key: keyPem, cert: certPem }, (_request, response) => { handled = true; response.end('ok') })
+    await new Promise<void>(resolve => server.listen(0, '127.0.0.1', resolve))
+    const address = server.address()
+    if (address === null || typeof address === 'string') throw new Error('fixture server has no HTTPS port')
+    try {
+      const s3: SourceConfig = {
+        ...source('s3'),
+        connection: { endpoint: `https://127.0.0.1:${address.port}`, bucket: 'fixture' },
+      }
+      await expect(new S3Connector().probe({ source: s3, credential: JSON.stringify({ accessKeyId: 'fixture', secretAccessKey: 'fixture' }) }))
+        .rejects.toThrow('fetch failed')
+      expect(handled).toBe(false)
+    } finally {
+      await new Promise<void>((resolve, reject) => server.close(error => error === undefined ? resolve() : reject(error)))
+      await rm(root, { recursive: true, force: true })
+    }
+  })
+
+  it('rejects a self-signed PostgreSQL TLS peer instead of permitting certificate bypass', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'dsh-postgres-tls-'))
+    const { key, cert } = await selfSigned(root)
+    const [keyPem, certPem] = await Promise.all([readFile(key), readFile(cert)])
+    const server = createServer((socket) => {
+      socket.once('data', () => {
+        socket.write('S')
+        const secure = new tls.TLSSocket(socket, { isServer: true, key: keyPem, cert: certPem })
+        secure.on('error', () => {})
+      })
+    })
+    const port = await listen(server)
+    try {
+      const postgres: SourceConfig = {
+        ...source('postgresql'),
+        connection: { host: '127.0.0.1', port, database: 'fixture', timeoutMs: 1_000, tls: { serverName: 'localhost' } },
+      }
+      await expect(new PostgreSqlConnector().probe({ source: postgres, credential: JSON.stringify({ username: 'fixture' }) }))
+        .rejects.toThrow(/self-signed|certificate/i)
+    } finally {
+      await new Promise<void>((resolve, reject) => server.close(error => error === undefined ? resolve() : reject(error)))
+      await rm(root, { recursive: true, force: true })
     }
   })
 

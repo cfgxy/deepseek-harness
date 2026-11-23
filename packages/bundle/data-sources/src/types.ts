@@ -1,4 +1,5 @@
 /* oxlint-disable @stylistic/max-len -- concise config validation keeps source kind invariants adjacent. */
+import { isAbsolute } from 'node:path'
 import { isCredentialRefName } from '@deepseek-ai/dsh-credentials'
 
 export const SOURCE_KINDS = ['local-directory', 's3', 'sftp', 'mysql', 'postgresql'] as const
@@ -24,6 +25,8 @@ export interface SourceConnection {
   timeoutMs?: number
   /** Per-statement database deadline in milliseconds; defaults to connection deadline. */
   statementTimeoutMs?: number
+  /** Strict database TLS options. No skip-verify switch is supported. */
+  tls?: { caPath?: string; serverName?: string }
 }
 export interface SourceConfig {
   id: string
@@ -69,9 +72,10 @@ export function assertSourceConfig(source: SourceConfig): void {
   if (source.connection?.port !== undefined && (!Number.isInteger(source.connection.port) || source.connection.port < 1 || source.connection.port > 65535)) {
     throw new Error(`data-sources: source ${source.id} has an invalid port`)
   }
-  for (const [field, value] of [['timeoutMs', source.connection?.timeoutMs], ['statementTimeoutMs', source.connection?.statementTimeoutMs]] as const) {
-    if (value !== undefined && (!Number.isInteger(value) || value < 1 || value > 120_000)) {
-      throw new Error(`data-sources: source ${source.id} has an invalid ${field}`)
-    }
+  if (source.connection?.tls !== undefined) {
+    if (source.kind !== 'mysql' && source.kind !== 'postgresql') throw new Error(`data-sources: source ${source.id} TLS is supported only for database connectors`)
+    const { caPath, serverName } = source.connection.tls
+    if (caPath !== undefined && (!isAbsolute(caPath) || caPath.trim() === '')) throw new Error(`data-sources: source ${source.id} TLS caPath must be absolute`)
+    if (serverName !== undefined && serverName.trim() === '') throw new Error(`data-sources: source ${source.id} TLS serverName must be non-empty`)
   }
 }
