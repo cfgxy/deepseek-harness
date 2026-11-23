@@ -76,10 +76,10 @@ async function startFixture(): Promise<Fixture> {
   const suffix = `${process.pid}-${Date.now()}`
   const names = [`dsh-ds-s3-${suffix}`, `dsh-ds-sftp-${suffix}`, `dsh-ds-mysql-${suffix}`, `dsh-ds-postgres-${suffix}`]
   try {
-    await run('docker', ['run', '-d', '--rm', '--name', names[0]!, '-p', '127.0.0.1::8333', '-p', '127.0.0.1::8888', '-v', `${root}/s3.json:/etc/seaweedfs/s3.json:ro`, 'chrislusf/seaweedfs:latest', 'server', '-s3', '-s3.port=8333', '-s3.config=/etc/seaweedfs/s3.json'])
-    await run('docker', ['run', '-d', '--rm', '--name', names[1]!, '-p', '127.0.0.1::22', '-v', `${ssh}/keys:/home/fixture/.ssh/keys:ro`, 'atmoz/sftp', `fixture:${fixturePassword}:1001`])
-    await run('docker', ['run', '-d', '--rm', '--name', names[2]!, '-e', `MARIADB_ROOT_PASSWORD=${fixturePassword}`, '-e', 'MARIADB_ROOT_HOST=%', '-e', 'MARIADB_DATABASE=fixture', '-p', '127.0.0.1::3306', 'mariadb:11'])
-    await run('docker', ['run', '-d', '--rm', '--name', names[3]!, '-e', `POSTGRES_PASSWORD=${fixturePassword}`, '-e', 'POSTGRES_DB=fixture', '-e', 'POSTGRES_HOST_AUTH_METHOD=md5', '-p', '127.0.0.1::5432', '-v', `${root}/postgres-init.sql:/docker-entrypoint-initdb.d/10-fixture.sql:ro`, 'postgres:17.11'])
+    await run('docker', ['run', '-d', '--rm', '--name', names[0]!, '-p', '127.0.0.1::8333', '-p', '127.0.0.1::8888', '-v', `${root}/s3.json:/etc/seaweedfs/s3.json:ro`, 'chrislusf/seaweedfs@sha256:7ca46aeae2f223b37e5d91593c17ab37738eec6df6ab69b48a0487f7643342b9', 'server', '-s3', '-s3.port=8333', '-s3.config=/etc/seaweedfs/s3.json'])
+    await run('docker', ['run', '-d', '--rm', '--name', names[1]!, '-p', '127.0.0.1::22', '-v', `${ssh}/keys:/home/fixture/.ssh/keys:ro`, 'atmoz/sftp@sha256:0960390462a4441dbb63698d7c185b76a41ffcee7b78ff4adf275f3e66f9c475', `fixture:${fixturePassword}:1001`])
+    await run('docker', ['run', '-d', '--rm', '--name', names[2]!, '-e', `MARIADB_ROOT_PASSWORD=${fixturePassword}`, '-e', 'MARIADB_ROOT_HOST=%', '-e', 'MARIADB_DATABASE=fixture', '-p', '127.0.0.1::3306', 'mariadb@sha256:e1d5495f445654134f226f55a41ce0da227116f6f27f283101f405c794d841fc'])
+    await run('docker', ['run', '-d', '--rm', '--name', names[3]!, '-e', `POSTGRES_PASSWORD=${fixturePassword}`, '-e', 'POSTGRES_DB=fixture', '-e', 'POSTGRES_HOST_AUTH_METHOD=md5', '-p', '127.0.0.1::5432', '-v', `${root}/postgres-init.sql:/docker-entrypoint-initdb.d/10-fixture.sql:ro`, 'postgres@sha256:ff87138949ad9a46f32ff23bd6852b52ce024a13dffe9b4087be98292cdd3b4f'])
 
     const [s3Port, filerPort, sftpPort, mysqlPort, postgresPort] = await Promise.all([
       hostPort(names[0]!, '8333/tcp'), hostPort(names[0]!, '8888/tcp'), hostPort(names[1]!, '22/tcp'), hostPort(names[2]!, '3306/tcp'), hostPort(names[3]!, '5432/tcp'),
