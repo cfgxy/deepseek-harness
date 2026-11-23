@@ -14,12 +14,12 @@
     - code: "@deepseek-ai/dsh-experimental-enterprise-runtime"
     - text: and its Web Plugin Manager sidebar-detail contribution. Plugin Manager and HMR own this first-level bundle's lifecycle; the runtime owns second-level ZIP inventory beneath its configured storage directory.
 - heading "Components" [level=4]
-- text: 2 total · 1 running
+- text: 2 total · 2 running
 - list:
   - listitem:
     - text: "@deepseek-ai/dsh-experimental-enterprise-runtime Experimental persistent declarative enterprise ZIP capability runtime"
     - code: enterprise-runtime
-    - text: Not running
+    - text: Running
     - switch "Enable component @deepseek-ai/dsh-experimental-enterprise-runtime" [checked]
   - listitem:
     - text: Enterprise runtime prototypes Declarative list, detail, chart, and report prototypes in the Plugin Manager sidebar.

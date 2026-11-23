@@ -5,6 +5,7 @@ import { fileURLToPath } from 'node:url'
 import { join } from 'node:path'
 import type { Browser, Page } from 'playwright'
 import { chromium } from 'playwright'
+import { FiberState } from '@deepseek-ai/cordis'
 import { afterAll, beforeAll, describe, expect, it, onTestFailed } from 'vitest'
 import {
   assertFixtureInventory, captureStableAria, compareOrRefreshGolden,
@@ -46,6 +47,9 @@ describe('web e2e: Enterprise Runtime Plugin Manager contribution', () => {
         ],
       },
     })
+    const runtimeEntry = [...scaffold.ctx.loader.entries()]
+      .find(entry => entry.options.id === 'enterprise-runtime')
+    expect(runtimeEntry?.fiber?.state).toBe(FiberState.ACTIVE)
 
     browser = await chromium.launch()
     page = await newEnglishPage(browser)

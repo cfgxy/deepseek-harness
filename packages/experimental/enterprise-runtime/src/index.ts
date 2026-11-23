@@ -264,6 +264,9 @@ export class EnterpriseRuntimeService extends Service {
   }
 }
 
+/** Loader entry point; the named export remains available to direct Host integrations. */
+export default EnterpriseRuntimeService
+
 declare module '@deepseek-ai/cordis' {
   interface Context {
     enterpriseRuntime: EnterpriseRuntimeService
