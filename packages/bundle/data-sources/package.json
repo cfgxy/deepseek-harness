@@ -1,0 +1,43 @@
+{
+  "name": "@ruyi/dsh-data-sources",
+  "version": "0.2.2-alpha.2",
+  "description": "Read-only data-source registry and MCP-backed tool bundle for DeepSeek Harness",
+  "publishConfig": { "access": "public" },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/cfgxy/deepseek-harness.git",
+    "directory": "packages/bundle/data-sources"
+  },
+  "type": "module",
+  "main": "lib/index.js",
+  "types": "lib/types/index.d.ts",
+  "exports": {
+    ".": { "types": "./lib/types/index.d.ts", "default": "./lib/index.js" },
+    "./api": { "types": "./lib/types/api.d.ts", "default": "./lib/api.js" },
+    "./cordis.patch.yml": "./cordis.patch.yml",
+    "./src/*": "./src/*",
+    "./package.json": "./package.json",
+    "./locale/*.json": "./locale/*.json"
+  },
+  "files": ["locale/*.json", "lib/index.js", "lib/api.js", "lib/types/**/*.js", "lib/types/**/*.d.ts", "cordis.patch.yml"],
+  "license": "MIT",
+  "engines": { "dsh": ">=0.2.2-alpha.2 <0.3.0" },
+  "dependencies": { "@deepseek-ai/schemastery": "workspace:~" },
+  "peerDependencies": {
+    "@deepseek-ai/cordis": "workspace:~",
+    "@deepseek-ai/dsh-credentials": "workspace:*",
+    "@deepseek-ai/dsh-mcp-client": "workspace:*",
+    "@deepseek-ai/dsh-tools": "workspace:*",
+    "@deepseek-ai/dsh-util-crypto": "workspace:*"
+  },
+  "devDependencies": {
+    "@deepseek-ai/cordis": "workspace:~",
+    "@deepseek-ai/dsh-credentials": "workspace:*",
+    "@deepseek-ai/dsh-mcp-client": "workspace:*",
+    "@deepseek-ai/dsh-tool-executor-native": "workspace:*",
+    "@deepseek-ai/dsh-tool-testkit": "workspace:*",
+    "@deepseek-ai/dsh-tools": "workspace:*",
+    "@deepseek-ai/dsh-util-crypto": "workspace:*"
+  },
+  "dsh": { "bundle": { "patch": "./cordis.patch.yml" } }
+}

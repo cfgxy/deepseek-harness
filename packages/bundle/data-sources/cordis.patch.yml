@@ -1,0 +1,5 @@
+- insert:
+    - id: data-sources
+      name: '@ruyi/dsh-data-sources'
+      config:
+        sources: []
