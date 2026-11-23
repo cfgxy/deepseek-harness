@@ -532,3 +532,8 @@
 
     - id: llm-deepseek-account
       name: '@deepseek-ai/dsh-llm-deepseek-account'
+
+    # Pa诺云 account and Sub2API provisioning run only in the Host. Its JWT and
+    # selected key are held by the credential service and never cross into the Web renderer.
+    - id: panuoyun-account
+      name: '@deepseek-ai/dsh-panuoyun-account'

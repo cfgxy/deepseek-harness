@@ -493,6 +493,7 @@
       "@deepseek-ai/dsh-official-bundles": ["./packages/util/official-bundles/src"],
       "@deepseek-ai/dsh-output-retention": ["./packages/util/output-retention/src"],
       "@deepseek-ai/dsh-package-manifest": ["./packages/util/package-manifest/src"],
+      "@deepseek-ai/dsh-panuoyun-account": ["./packages/credentials/panuoyun-account/src"],
       "@deepseek-ai/dsh-permission-presets": ["./packages/interaction/permission-presets/src"],
       "@deepseek-ai/dsh-persona": ["./packages/preset/persona/src"],
       "@deepseek-ai/dsh-personalized-recommendations": ["./packages/experimental/personalized-recommendations/src"],
