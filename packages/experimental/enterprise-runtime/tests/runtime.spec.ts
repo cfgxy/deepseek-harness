@@ -1,6 +1,7 @@
 import { Context } from '@deepseek-ai/cordis'
 import SystemPrompt from '@deepseek-ai/dsh-system-prompt'
 import ToolRuntime, { defineTool } from '@deepseek-ai/dsh-tools'
+import type { JsonValue } from '@deepseek-ai/dsh-util-values'
 import { mkdtemp, readFile, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -85,6 +86,32 @@ describe('enterprise runtime', () => {
     await expect(service.install(await fixture('basic.zip'))).rejects.toThrow('duplicate-package-version')
     await expect(service.install(await fixture('bad-update.zip'))).rejects.toThrow('template-invalid')
     expect(service.list()).toHaveLength(1)
+  })
+
+  it('supports declarative details, charts, reports, and a connector-free Langfuse question', async () => {
+    const observed: JsonValue[] = []
+    const source: DataSourceApiV1 = {
+      apiVersion: '1',
+      async execute(request) {
+        observed.push(request.query)
+        return { rows: [{ value: 12 }] }
+      },
+    }
+    const service = await runtime(source)
+    for (const name of ['detail.zip', 'chart.zip', 'langfuse-report.zip']) await service.install(await fixture(name))
+    for (const [id, version] of [['acme.order-detail', '1.0.0'], ['acme.order-chart', '1.0.0'], ['acme.langfuse-question', '1.0.0']] as const) {
+      service.activate(id, version)
+    }
+    await expect(service.api.invoke('acme.order-detail', new AbortController().signal)).resolves.toMatchObject({
+      template: { kind: 'detail', fields: ['id', 'status'] }, rows: [{ value: 12 }],
+    })
+    await expect(service.invoke('acme.order-chart', new AbortController().signal)).resolves.toMatchObject({
+      template: { kind: 'chart', chart: 'bar', x: 'status', y: 'count' },
+    })
+    await expect(service.invoke('acme.langfuse-question', new AbortController().signal)).resolves.toMatchObject({
+      template: { kind: 'report', title: 'Langfuse trace volume' },
+    })
+    expect(observed).toContainEqual({ source: 'langfuse', question: 'How many traces were recorded in the selected period?' })
   })
 
   it('reports an absent data source and projects only rows from an optional provider', async () => {

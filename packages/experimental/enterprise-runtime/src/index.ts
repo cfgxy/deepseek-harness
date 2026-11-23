@@ -28,21 +28,59 @@ export interface DataSourceApiV1 {
   ): Promise<Readonly<{ rows: readonly JsonValue[]; nextCursor?: string }>>
 }
 
-/** The only template this POC accepts. */
+/** Declarative screen templates accepted from a second-level enterprise ZIP. */
 export interface ListTemplate extends Record<string, JsonValue> {
   readonly kind: 'list'
   readonly title: string
   readonly dataAction?: 'query'
+  readonly query?: JsonValue
+}
+
+export interface DetailTemplate extends Record<string, JsonValue> {
+  readonly kind: 'detail'
+  readonly title: string
+  readonly fields: string[]
+  readonly dataAction?: 'query'
+  readonly query?: JsonValue
+}
+
+export interface ChartTemplate extends Record<string, JsonValue> {
+  readonly kind: 'chart'
+  readonly title: string
+  readonly chart: 'bar' | 'line' | 'pie'
+  readonly x: string
+  readonly y: string
+  readonly dataAction?: 'query'
+  readonly query?: JsonValue
+}
+
+export interface ReportTemplate extends Record<string, JsonValue> {
+  readonly kind: 'report'
+  readonly title: string
+  readonly sections: string[]
+  readonly dataAction?: 'query'
+  readonly query?: JsonValue
+}
+
+export type RuntimeTemplate = ListTemplate | DetailTemplate | ChartTemplate | ReportTemplate
+
+/** Stable facade for first-level Plugin Manager, Host, and client integrations. */
+export interface EnterpriseRuntimeApiV1 {
+  readonly apiVersion: '1'
+  list(): readonly RuntimeManifest[]
+  activate(id: string, version: string): void
+  uninstall(id: string): Promise<void>
+  invoke(id: string, signal: AbortSignal): Promise<RuntimeResult | RuntimeError>
 }
 
 /** JSON-safe output returned by an active enterprise capability. */
 export interface RuntimeResult extends Record<string, JsonValue> {
-  readonly template: ListTemplate
+  readonly template: RuntimeTemplate
   readonly rows?: JsonValue[]
   readonly nextCursor?: string
 }
 
-interface StoredPackage { manifest: RuntimeManifest; entry: ListTemplate }
+interface StoredPackage { manifest: RuntimeManifest; entry: RuntimeTemplate }
 interface Inventory { packages: Record<string, Record<string, StoredPackage>> }
 interface ActiveCapability { version: string; toolName: string; dispose: () => void }
 
@@ -79,6 +117,14 @@ export class EnterpriseRuntimeService extends Service {
   private readonly limits: Required<Omit<Config, 'storageDir'>>
   private inventory: Inventory = { packages: {} }
   private readonly active = new Map<string, ActiveCapability>()
+  /** Public v1 facade for first-level integrations; ZIP content never receives it. */
+  readonly api: EnterpriseRuntimeApiV1 = {
+    apiVersion: '1',
+    list: () => this.list(),
+    activate: (id, version) => this.activate(id, version),
+    uninstall: id => this.uninstall(id),
+    invoke: (id, signal) => this.invoke(id, signal),
+  }
 
   constructor(ctx: Context, config: Config) {
     super(ctx, 'enterpriseRuntime')
@@ -178,7 +224,7 @@ export class EnterpriseRuntimeService extends Service {
     if (item.entry.dataAction !== 'query') return { template: item.entry }
     const source = this.ctx.get('dataSourceApi')
     if (source === undefined || source.apiVersion !== '1') return new RuntimeError('data-source-unavailable')
-    const result = await source.execute({ query: { template: item.entry.title }, limit: 100 }, signal)
+    const result = await source.execute({ query: item.entry.query ?? { template: item.entry.title }, limit: 100 }, signal)
     return { template: item.entry, rows: [...result.rows], ...result.nextCursor === undefined ? {} : { nextCursor: result.nextCursor } }
   }
 
@@ -252,15 +298,26 @@ function parseManifest(raw: Uint8Array | undefined): RuntimeManifest {
   return value as unknown as RuntimeManifest
 }
 
-function parseEntry(raw: Uint8Array | undefined): ListTemplate {
+function parseEntry(raw: Uint8Array | undefined): RuntimeTemplate {
   if (raw === undefined) throw new RuntimeError('entry-missing')
   const value = JSON.parse(Buffer.from(raw).toString('utf8')) as Record<string, unknown>
-  if (value.kind !== 'list' || typeof value.title !== 'string' || (value.dataAction !== undefined && value.dataAction !== 'query')) throw new RuntimeError('template-invalid')
-  return {
-    kind: 'list',
-    title: value.title,
-    ...value.dataAction === undefined ? {} : { dataAction: value.dataAction },
+  const dataAction: 'query' | undefined = value.dataAction === 'query' ? 'query' : undefined
+  if (typeof value.title !== 'string' || (value.dataAction !== undefined && dataAction === undefined)) throw new RuntimeError('template-invalid')
+  const action = dataAction === undefined ? {} : { dataAction }
+  const query = value.query === undefined ? {} : { query: value.query as JsonValue }
+  const base = { title: value.title, ...action, ...query }
+  if (value.kind === 'list') return { kind: 'list', ...base }
+  if (value.kind === 'detail' && Array.isArray(value.fields) && value.fields.every(field => typeof field === 'string')) {
+    return { kind: 'detail', ...base, fields: value.fields }
   }
+  if (value.kind === 'chart' && (value.chart === 'bar' || value.chart === 'line' || value.chart === 'pie')
+    && typeof value.x === 'string' && typeof value.y === 'string') {
+    return { kind: 'chart', ...base, chart: value.chart, x: value.x, y: value.y }
+  }
+  if (value.kind === 'report' && Array.isArray(value.sections) && value.sections.every(section => typeof section === 'string')) {
+    return { kind: 'report', ...base, sections: value.sections }
+  }
+  throw new RuntimeError('template-invalid')
 }
 
 function readZip(zip: Uint8Array, limits: Required<Omit<Config, 'storageDir'>>): Promise<Map<string, Uint8Array>> {

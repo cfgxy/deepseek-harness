@@ -3,3 +3,7 @@
       name: '@deepseek-ai/dsh-experimental-enterprise-runtime'
       config:
         storageDir: .enterprise-runtime
+    # The client contribution appears beneath this bundle's Plugin Manager
+    # sidebar detail page and never exposes a provider or ZIP payload.
+    - id: ui-enterprise-runtime
+      name: '@deepseek-ai/dsh-experimental-client-ui-enterprise-runtime'
