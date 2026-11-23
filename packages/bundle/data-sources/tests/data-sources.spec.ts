@@ -14,7 +14,7 @@ import { MysqlConnector } from '../src/mysql.ts'
 import { S3Connector } from '../src/s3.ts'
 import { PostgreSqlConnector } from '../src/postgresql.ts'
 import { ConnectorSupervisor, type ConnectorRequest, type ReadConnector } from '../src/supervisor.ts'
-import type { ReadOperation, SourceConfig, SourceKind } from '../src/types.ts'
+import { assertSourceConfig, type ReadOperation, type SourceConfig, type SourceKind } from '../src/types.ts'
 
 const kinds: readonly SourceKind[] = ['local-directory', 's3', 'sftp', 'mysql', 'postgresql']
 const execFileAsync = promisify(execFile)
@@ -123,6 +123,17 @@ describe('read-only data source supervisor', () => {
       ...source('postgresql'), credentialRef: 'DATA_SOURCE_TEST',
     }] })
     expect(parsed.sources[0]?.credentialRef).toBe('DATA_SOURCE_TEST')
+    expect(parsed.sources[0]?.connection?.tls?.enabled).toBeUndefined()
+    expect(() => assertSourceConfig(parsed.sources[0]!)).not.toThrow()
+  })
+
+  it('keeps TLS opt-in and retains numeric deadline validation', () => {
+    expect(() => assertSourceConfig({
+      ...source('postgresql'), connection: { host: '127.0.0.1', database: 'fixture', timeoutMs: 0 },
+    })).toThrow('invalid timeoutMs')
+    expect(() => assertSourceConfig({
+      ...source('s3'), connection: { endpoint: 'https://example.invalid', bucket: 'fixture', tls: { enabled: true } },
+    })).toThrow('TLS is supported only for database connectors')
   })
 
   it.each(kinds)('executes the %s fixture read through its matching connector', async (kind) => {
@@ -257,7 +268,7 @@ describe('read-only data source supervisor', () => {
     try {
       const mysql: SourceConfig = {
         ...source('mysql'),
-        connection: { host: '127.0.0.1', port, database: 'fixture', timeoutMs: 1_000, tls: { serverName: 'localhost' } },
+        connection: { host: '127.0.0.1', port, database: 'fixture', timeoutMs: 1_000, tls: { enabled: true, serverName: 'localhost' } },
       }
       await expect(new MysqlConnector().probe({ source: mysql, credential: JSON.stringify({ username: 'fixture', password: 'fixture' }) }))
         .rejects.toThrow('does not support required TLS')
@@ -304,7 +315,7 @@ describe('read-only data source supervisor', () => {
     try {
       const postgres: SourceConfig = {
         ...source('postgresql'),
-        connection: { host: '127.0.0.1', port, database: 'fixture', timeoutMs: 1_000, tls: { serverName: 'localhost' } },
+        connection: { host: '127.0.0.1', port, database: 'fixture', timeoutMs: 1_000, tls: { enabled: true, serverName: 'localhost' } },
       }
       await expect(new PostgreSqlConnector().probe({ source: postgres, credential: JSON.stringify({ username: 'fixture' }) }))
         .rejects.toThrow(/self-signed|certificate/i)

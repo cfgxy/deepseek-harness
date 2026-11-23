@@ -17,7 +17,7 @@ function readLen(buf: Buffer, at: number): [number, number] { const n = buf[at]!
 /** TLS is opt-in, but every configured session validates its peer certificate. */
 async function upgradeTls(socket: net.Socket, request: ConnectorRequest['source']): Promise<tls.TLSSocket> {
   const options = request.connection?.tls
-  if (options === undefined) throw new Error('data-sources: MySQL TLS options are missing')
+  if (options?.enabled !== true) throw new Error('data-sources: MySQL TLS options are missing')
   const ca = options.caPath === undefined ? undefined : await readFile(options.caPath)
   const secure = tls.connect({ socket, servername: options.serverName ?? request.connection?.host, rejectUnauthorized: true, ...(ca === undefined ? {} : { ca }) })
   await new Promise<void>((resolve, reject) => { secure.once('secureConnect', resolve); secure.once('error', reject) })
@@ -57,7 +57,7 @@ export class MysqlConnector implements ReadConnector {
       const hello = await next(); let at = 1; const serverEnd = hello.indexOf(0, at); const serverVersion = hello.toString('utf8', at, serverEnd); at = serverEnd + 1 + 4; const seed1 = hello.subarray(at, at + 8); at += 9; const capsLow = hello.readUInt16LE(at); at += 2 + 1 + 2; const capsHigh = hello.readUInt16LE(at); at += 2; const caps = (capsLow | (capsHigh << 16)) >>> 0; const authLength = hello[at++]!; at += 10; const seed2 = hello.subarray(at, at + Math.max(13, authLength - 8)).subarray(0, 12); const pluginAt = hello.indexOf(0, at + Math.max(13, authLength - 8)); const plugin = hello.toString('utf8', at + Math.max(13, authLength - 8), pluginAt < 0 ? undefined : pluginAt)
       if (plugin && plugin !== 'mysql_native_password') throw new Error(`data-sources: MySQL authentication ${plugin} is unsupported; configure mysql_native_password for this read-only connector`)
       const baseCapability = (caps & (0x00000001 | 0x00000004 | 0x00000008 | 0x00000200 | 0x00002000 | 0x00008000 | 0x00020000 | 0x00080000)) >>> 0
-      const wantsTls = request.source.connection?.tls !== undefined
+      const wantsTls = request.source.connection?.tls?.enabled === true
       if (wantsTls && (caps & 0x00000800) === 0) throw new Error('data-sources: MySQL server does not support required TLS')
       const capability = (baseCapability | (wantsTls ? 0x00000800 : 0)) >>> 0
       const header = Buffer.alloc(4 + 4 + 1 + 23); header.writeUInt32LE(capability, 0); header.writeUInt32LE(16 * 1024 * 1024, 4); header[8] = 45

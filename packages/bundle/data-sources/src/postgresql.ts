@@ -20,7 +20,7 @@ function cstring(value: string): Buffer { return Buffer.from(`${value}\0`) }
 /** Upgrade a connected PostgreSQL socket with strict certificate validation when TLS is configured. */
 async function upgradeTls(socket: net.Socket, source: ConnectorRequest['source']): Promise<net.Socket | tls.TLSSocket> {
   const options = source.connection?.tls
-  if (options === undefined) return socket
+  if (options?.enabled !== true) return socket
   const ca = options.caPath === undefined ? undefined : await readFile(options.caPath)
   const request = Buffer.alloc(8)
   request.writeUInt32BE(8, 0)

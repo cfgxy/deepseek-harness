@@ -38,7 +38,7 @@ export const Config: z<Config> = z.object({
     connection: z.object({
       endpoint: z.string(), bucket: z.string(), region: z.string(), host: z.string(), port: z.number().step(1).min(1).max(65535),
       database: z.string(), knownHostsPath: z.string(), timeoutMs: z.number().step(1).min(1), statementTimeoutMs: z.number().step(1).min(1),
-      tls: z.object({ caPath: z.string(), serverName: z.string() }).default({}),
+      tls: z.object({ enabled: z.boolean(), caPath: z.string(), serverName: z.string() }),
     }).default({}),
     policy: Policy.required(),
   })).default([]),
