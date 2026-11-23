@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 /** Login choices, timeout recovery, and manual cancellation. */
-import { cleanup, fireEvent, render, screen, act } from '@testing-library/react'
+import { cleanup, fireEvent, render, screen, act, waitFor } from '@testing-library/react'
 import { afterEach, expect, it, vi } from 'vitest'
 import type { AccountView, SignInAttemptId } from '@deepseek-ai/dsh-deepseek-account/types'
 import { SignInDialog } from '../src/client/SignInDialog.tsx'
@@ -21,6 +21,31 @@ function mount(attempt: AccountView['attempt'], copy: typeof en | typeof zh = en
   render(<SignInDialog {...props} />)
   return props
 }
+
+it('defaults to Pa诺云 and creates a dedicated group key without listing keys', async () => {
+  const panuoyun = {
+    configure: vi.fn(async () => {}), login: vi.fn(async () => {}),
+    groups: vi.fn(async () => [{ id: '42', name: 'Research' }]),
+    selectApiKey: vi.fn(async () => {}), createApiKey: vi.fn(async () => {}), signOut: vi.fn(async () => {}),
+  }
+  const props = dialogProps(null)
+  render(<SignInDialog {...props} panuoyun={panuoyun} />)
+  expect(screen.getByRole('dialog', { name: en.panuoyunTitle })).toBeTruthy()
+  expect(screen.getByLabelText<HTMLSelectElement>(en.panuoyunEdition).value).toBe('personal')
+  fireEvent.change(screen.getByLabelText(en.panuoyunEdition), { target: { value: 'enterprise' } })
+  fireEvent.change(screen.getByLabelText(en.panuoyunEnterpriseOrigin), { target: { value: 'https://tenant.ainoriahub.com' } })
+  fireEvent.change(screen.getByLabelText(en.panuoyunEmail), { target: { value: 'member@example.com' } })
+  fireEvent.change(screen.getByLabelText(en.panuoyunPassword), { target: { value: 'password-secret' } })
+  fireEvent.click(screen.getByRole('button', { name: en.signIn }))
+  await waitFor(() => { expect(panuoyun.configure).toHaveBeenCalledWith('enterprise', 'https://tenant.ainoriahub.com') })
+  expect(panuoyun.login).toHaveBeenCalledWith('member@example.com', 'password-secret')
+  await screen.findByText('Research')
+  fireEvent.change(screen.getByLabelText(en.panuoyunGroup), { target: { value: '42' } })
+  fireEvent.click(screen.getByRole('button', { name: en.panuoyunCreateKey }))
+  await waitFor(() => { expect(panuoyun.createApiKey).toHaveBeenCalledWith('DeepSeek Harness', 42) })
+  expect(document.body.textContent).not.toContain('password-secret')
+  expect(screen.queryByText(/key list/i)).toBeNull()
+})
 it.each([en, zh])('offers sign in or the existing API key editor', async (copy) => {
   const props = mount(null, copy)
   await expect(`${screen.getByRole('dialog').textContent}\n`).toMatchFileSnapshot(`./expected/login-${copy === en ? 'en' : 'zh'}.txt`)

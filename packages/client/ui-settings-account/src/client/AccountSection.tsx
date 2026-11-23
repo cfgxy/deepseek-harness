@@ -38,6 +38,17 @@ export interface AccountSnapshot {
   desktopOnboardingVisible?: boolean
 }
 
+export interface PanuoyunGroup { readonly id: string; readonly name: string }
+/** Safe Pa诺云 account actions; secret values only travel from the controlled form to the Host. */
+export interface PanuoyunOperations {
+  configure(mode: 'personal' | 'enterprise', enterpriseLoginOrigin: string): Promise<void>
+  login(email: string, password: string): Promise<void>
+  groups(): Promise<readonly PanuoyunGroup[]>
+  selectApiKey(key: string): Promise<void>
+  createApiKey(name: string, groupId?: number): Promise<void>
+  signOut(): Promise<void>
+}
+
 /** Host operations injected into the Cordis-free account component. */
 export interface AccountSectionInjected {
   /** @param snapshot - picture attempt whose rendered image failed; superseded attempts are ignored. */
@@ -77,6 +88,8 @@ export interface AccountSectionInjected {
   bonusNoticeShown: (orderId: BonusNotice['orderId']) => void
   /** @param orderId - notice the user closed. */
   bonusNoticeDismissed: (orderId: BonusNotice['orderId']) => void
+  /** Pa诺云 authentication and one selected API-key setup, when this bundle provides the integration. */
+  panuoyun?: PanuoyunOperations
   /** @returns after the login attempt is created. */
   start: () => Promise<void>
   /** @param id - attempt to cancel. @returns after cancellation or an already-admitted commit. */

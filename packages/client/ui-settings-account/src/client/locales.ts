@@ -1,11 +1,23 @@
 /** Account settings copy, owned by the account feature. */
 import { onboardingZh, onboardingEn, onboardingJa, onboardingEs, onboardingFr, onboardingDe, onboardingRu, onboardingPt } from './locales/onboarding.ts'
 
+/** Pa诺云 sign-in copy shared by locales that have no translated variant yet. */
+const panuoyunEn = {
+  panuoyunTitle: 'Sign in to Pa诺云', panuoyunDescription: 'Use a Pa诺云 account to configure an available model provider.',
+  panuoyunEdition: 'Edition', panuoyunPersonal: 'Personal', panuoyunEnterprise: 'Enterprise',
+  panuoyunEnterpriseOrigin: 'Enterprise sign-in URL', panuoyunEmail: 'Email', panuoyunPassword: 'Password',
+  panuoyunKeyDescription: 'Paste an existing API key, or create a dedicated key for DeepSeek Harness.',
+  panuoyunGroup: 'Group', panuoyunDefaultGroup: 'Default group', panuoyunApiKey: 'Existing API key',
+  panuoyunSignOut: 'Sign out', panuoyunCreateKey: 'Create dedicated key', panuoyunContinue: 'Verify and continue',
+  deepSeekAccount: 'DeepSeek account',
+} as const
+
 /** English account dictionary. */
 export const en = {
   modelSignInRequired: 'Model unavailable. Please sign in and try again.',
   sessionExpired: 'You have signed out of your account, please log in again.',
   ...onboardingEn,
+  ...panuoyunEn,
   close: 'Close', addApiKey: 'Add API Key', retry: 'Sign in again',
   loginTitle: 'Get started', loginDescription: 'Sign in to your DeepSeek account or add an API Key to get started. Your projects and files are stored locally.',
   browserTitle: 'Waiting for sign in', browserPrompt: 'Page did not open automatically? ', copyLink: 'Copy sign-in link', copiedLink: 'Link copied', copyFailed: 'Copy failed',
@@ -42,6 +54,14 @@ export const zh: Record<AccountKey, string> = {
   modelSignInRequired: '当前模型暂不可用，请登录后再试',
   sessionExpired: '登录信息已失效，请重新登录',
   ...onboardingZh,
+  ...panuoyunEn,
+  panuoyunTitle: '登录派诺云', panuoyunDescription: '使用派诺云账号配置可用模型提供商。',
+  panuoyunEdition: '版本', panuoyunPersonal: '个人版', panuoyunEnterprise: '企业版',
+  panuoyunEnterpriseOrigin: '企业专属登录地址', panuoyunEmail: '邮箱', panuoyunPassword: '密码',
+  panuoyunKeyDescription: '粘贴已有 API Key，或新建仅供 DeepSeek Harness 使用的专用 Key。',
+  panuoyunGroup: '分组', panuoyunDefaultGroup: '默认分组', panuoyunApiKey: '已有 API Key',
+  panuoyunSignOut: '退出登录', panuoyunCreateKey: '新建专用 Key', panuoyunContinue: '验证并继续',
+  deepSeekAccount: 'DeepSeek 账号',
   close: '关闭', addApiKey: '添加 API Key', retry: '重新登录',
   loginTitle: '开始使用', loginDescription: '登录 DeepSeek 账号，或添加 API Key，即可开始使用。你的项目和文件保存在本地。',
   browserTitle: '等待登录', browserPrompt: '没有自动打开新页面？', copyLink: '复制登录链接', copiedLink: '链接已复制', copyFailed: '复制失败',
@@ -75,6 +95,7 @@ export const zh: Record<AccountKey, string> = {
 /** Japanese copy, checked against the English keys. */
 export const ja = {
   ...onboardingJa,
+  ...panuoyunEn,
   'modelSignInRequired': 'モデルを利用できません。ログインしてから再試行してください。',
   'sessionExpired': 'アカウントからログアウトしました。もう一度ログインしてください。',
   'close': '閉じる',
@@ -137,6 +158,7 @@ export const es = {
   modelSignInRequired: 'Modelo no disponible. Por favor inicia sesión y vuelve a intentarlo.',
   sessionExpired: 'Has cerrado sesión en tu cuenta, inicia sesión nuevamente.',
   ...onboardingEs,
+  ...panuoyunEn,
   close: 'Cerrar', addApiKey: 'Agregar clave API', retry: 'Iniciar sesión nuevamente',
   loginTitle: 'empezar', loginDescription: 'Inicie sesión en su cuenta DeepSeek o agregue una clave API para comenzar. Sus proyectos y archivos se almacenan localmente.',
   browserTitle: 'Esperando iniciar sesión', browserPrompt: '¿La página no se abrió automáticamente? ', copyLink: 'Copiar enlace de inicio de sesión', copiedLink: 'Enlace copiado', copyFailed: 'Copia fallida',
@@ -172,6 +194,7 @@ export const fr = {
   modelSignInRequired: 'Modèle indisponible. Veuillez vous connecter et réessayer.',
   sessionExpired: 'Vous vous êtes déconnecté de votre compte, veuillez vous reconnecter.',
   ...onboardingFr,
+  ...panuoyunEn,
   close: 'Fermer', addApiKey: 'Ajouter une clé API', retry: 'Connectez-vous à nouveau',
   loginTitle: 'Commencez', loginDescription: 'Connectez-vous à votre compte DeepSeek ou ajoutez une clé API pour commencer. Vos projets et fichiers sont stockés localement.',
   browserTitle: 'En attente de connexion', browserPrompt: "La page ne s'est pas ouverte automatiquement ? ", copyLink: 'Copier le lien de connexion', copiedLink: 'Lien copié', copyFailed: 'Échec de la copie',
@@ -207,6 +230,7 @@ export const de = {
   modelSignInRequired: 'Modell nicht verfügbar. Bitte melden Sie sich an und versuchen Sie es erneut.',
   sessionExpired: 'Sie haben sich von Ihrem Konto abgemeldet. Bitte melden Sie sich erneut an.',
   ...onboardingDe,
+  ...panuoyunEn,
   close: 'Schließen', addApiKey: 'Fügen Sie den API-Schlüssel hinzu', retry: 'Melden Sie sich erneut an',
   loginTitle: 'Fangen Sie an', loginDescription: 'Melden Sie sich bei Ihrem DeepSeek-Konto an oder fügen Sie einen API-Schlüssel hinzu, um loszulegen. Ihre Projekte und Dateien werden lokal gespeichert.',
   browserTitle: 'Warten auf die Anmeldung', browserPrompt: 'Seite wurde nicht automatisch geöffnet? ', copyLink: 'Anmeldelink kopieren', copiedLink: 'Link kopiert', copyFailed: 'Das Kopieren ist fehlgeschlagen',
@@ -242,6 +266,7 @@ export const ru = {
   modelSignInRequired: 'Модель недоступна. Пожалуйста, войдите в систему и повторите попытку.',
   sessionExpired: 'Вы вышли из своей учетной записи, пожалуйста, войдите снова.',
   ...onboardingRu,
+  ...panuoyunEn,
   close: 'Закрыть', addApiKey: 'Добавить ключ API', retry: 'Войдите снова',
   loginTitle: 'Начать', loginDescription: 'Войдите в свою учетную запись DeepSeek или добавьте ключ API, чтобы начать. Ваши проекты и файлы хранятся локально.',
   browserTitle: 'Ожидание входа в систему', browserPrompt: 'Страница не открылась автоматически? ', copyLink: 'Скопировать ссылку для входа', copiedLink: 'Ссылка скопирована', copyFailed: 'Не удалось скопировать',
@@ -277,6 +302,7 @@ export const pt = {
   modelSignInRequired: 'Modelo indisponível. Faça login e tente novamente.',
   sessionExpired: 'Você saiu da sua conta, faça login novamente.',
   ...onboardingPt,
+  ...panuoyunEn,
   close: 'Fechar', addApiKey: 'Adicionar chave API', retry: 'Faça login novamente',
   loginTitle: 'Comece', loginDescription: 'Faça login em sua conta DeepSeek ou adicione uma chave API para começar. Seus projetos e arquivos são armazenados localmente.',
   browserTitle: 'Aguardando login', browserPrompt: 'A página não abriu automaticamente? ', copyLink: 'Copiar link de login', copiedLink: 'Link copiado', copyFailed: 'Falha na cópia',
