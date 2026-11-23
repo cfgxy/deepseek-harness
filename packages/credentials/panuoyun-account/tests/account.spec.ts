@@ -21,10 +21,12 @@ async function mount(
     value: { providers: { ...configuredProvider } },
     user: { providers: { ...configuredProvider } },
     mutations: [] as Array<unknown>,
+    failMutation: false,
   }
   ctx.provide('settings', {
     describe: () => [{ ns: 'llm-pi-ai', value: settings.value, user: settings.user }],
     mutate: async (_ns: string, ops: Array<{ op: 'set' | 'unset'; path: string[]; value?: unknown }>) => {
+      if (settings.failMutation) throw new Error('settings unavailable')
       settings.mutations.push(ops)
       for (const op of ops) {
         if (op.op === 'set') settings.value.providers.panuoyun = structuredClone(op.value)
@@ -120,6 +122,29 @@ describe('PanuoyunAccount', () => {
 
     await expect(test.account.selectApiKey('selected-secret')).rejects.toThrow('credential disk unavailable')
     expect(test.settings.value.providers.panuoyun).toBeUndefined()
+    await test.dispose()
+  })
+
+  it('rolls back the exact previous route if saving a verified replacement key fails', async () => {
+    const fetch = vi.fn(async () => response(200, { data: [{ id: 'model-b' }] }))
+    vi.stubGlobal('fetch', fetch)
+    const previous = { displayName: 'Existing', apiKeyEnv: 'EXISTING_KEY', api: 'openai-completions', baseURL: 'https://old.example/v1', models: [{ id: 'model-a' }] }
+    const test = await mount({ PANUOYUN_API_KEY: 'old-secret' }, {}, { panuoyun: previous })
+    vi.spyOn(test.ctx.credentials, 'set').mockRejectedValueOnce(new Error('credential disk unavailable'))
+
+    await expect(test.account.selectApiKey('replacement-secret')).rejects.toThrow('credential disk unavailable')
+    expect(test.settings.value.providers.panuoyun).toEqual(previous)
+    await expect(test.ctx.credentials.resolve(PANUOYUN_API_KEY_REF)).resolves.toMatchObject({ value: 'old-secret' })
+    await test.dispose()
+  })
+
+  it('preserves credentials when route cleanup fails during sign out', async () => {
+    const test = await mount({ PANUOYUN_JWT: 'jwt-secret', PANUOYUN_API_KEY: 'selected-secret' })
+    test.settings.failMutation = true
+
+    await expect(test.account.signOut()).rejects.toThrow('settings unavailable')
+    await expect(test.ctx.credentials.resolve(PANUOYUN_JWT_REF)).resolves.toMatchObject({ value: 'jwt-secret' })
+    await expect(test.ctx.credentials.resolve(PANUOYUN_API_KEY_REF)).resolves.toMatchObject({ value: 'selected-secret' })
     await test.dispose()
   })
 

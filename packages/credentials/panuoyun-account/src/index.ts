@@ -97,11 +97,11 @@ export class PanuoyunAccount extends TypertRemoteService {
   async selectApiKey(key: string): Promise<readonly PanuoyunModel[]> {
     if (key.length === 0) throw new TypeError('Pa诺云 API key must not be empty')
     const models = await this.requestModels(key)
-    await this.configureProvider(models)
+    const previous = await this.configureProvider(models)
     try {
       await this.ctx.credentials.set(PANUOYUN_API_KEY_REF, key)
     } catch (error) {
-      await this.restoreProvider().catch(() => undefined)
+      await this.restoreProvider(previous).catch(() => undefined)
       throw error
     }
     return models
@@ -133,9 +133,8 @@ export class PanuoyunAccount extends TypertRemoteService {
   /** Sign out locally without exposing either secret or asking the browser to clear it. */
   @Remote
   async signOut(): Promise<void> {
-    const remove = this.removeProvider()
+    await this.removeProvider()
     await Promise.all([this.ctx.credentials.unset(PANUOYUN_JWT_REF), this.ctx.credentials.unset(PANUOYUN_API_KEY_REF)])
-    await remove
   }
 
   /** Resolve one operation's fixed API origin and its separately scoped login origin. */
@@ -158,7 +157,7 @@ export class PanuoyunAccount extends TypertRemoteService {
   }
 
   /** Write the validated discovery result as one profile while preserving explicit model fields a user already saved. */
-  private async configureProvider(models: readonly PanuoyunModel[]): Promise<void> {
+  private async configureProvider(models: readonly PanuoyunModel[]): Promise<Record<string, unknown> | undefined> {
     const descriptor = this.settingsDescriptor()
     const current = providerProfile(descriptor?.value) ?? {}
     const previous = providerProfile(descriptor?.user)
@@ -170,10 +169,10 @@ export class PanuoyunAccount extends TypertRemoteService {
       baseURL: `${this.connection().apiOrigin}/v1`,
       models: mergeModels(current.models, models),
     }
-    this.providerBeforeWrite = previous
     await this.ctx.settings.mutate(PANUOYUN_LLM_SETTINGS_NAMESPACE, [{
       op: 'set', path: ['providers', PANUOYUN_PROVIDER], value: profile,
     }])
+    return previous
   }
 
   /** Remove the route owned by this integration before dropping its credential. */
@@ -184,15 +183,12 @@ export class PanuoyunAccount extends TypertRemoteService {
   }
 
   /** Roll back the exact previous user-level route if credential persistence fails after a settings write. */
-  private async restoreProvider(): Promise<void> {
-    const previous = this.providerBeforeWrite
+  private async restoreProvider(previous: Record<string, unknown> | undefined): Promise<void> {
     const op: SettingsPathOp = previous === undefined
       ? { op: 'unset', path: ['providers', PANUOYUN_PROVIDER] }
       : { op: 'set', path: ['providers', PANUOYUN_PROVIDER], value: previous }
     await this.ctx.settings.mutate(PANUOYUN_LLM_SETTINGS_NAMESPACE, [op])
   }
-
-  private providerBeforeWrite: Record<string, unknown> | undefined
 
   private settingsDescriptor(): SettingsDescriptor | undefined {
     return this.ctx.settings.describe().find(entry => entry.ns === PANUOYUN_LLM_SETTINGS_NAMESPACE)

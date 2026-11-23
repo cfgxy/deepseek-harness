@@ -43,10 +43,11 @@ export function SignInDialog({ account, colorScheme, start, cancel, close, useAp
   }, [copyResult])
   const authorizeUrl = attempt?.authorizeUrl
   const phase = attempt?.phase
-  const active = busy || phase === 'initializing' || phase === 'waiting-browser' || phase === 'exchanging' || phase === 'committing'
-  const expired = phase === 'expired'
-  const localFailure = failed || account.loginFailed || account.failed
-  const error = localFailure || phase === 'failed'
+  const deepseekActive = phase === 'initializing' || phase === 'waiting-browser' || phase === 'exchanging' || phase === 'committing'
+  const active = busy || deepseekActive
+  const expired = route === 'deepseek' && phase === 'expired'
+  const localFailure = failed || (route === 'deepseek' && (account.loginFailed || account.failed))
+  const error = localFailure || (route === 'deepseek' && phase === 'failed')
   const failureKey = !localFailure
     && phase === 'failed' && attempt?.errorCode === 'no-response' ? 'noResponse' : 'failed'
   const waiting = active && !error
@@ -73,6 +74,7 @@ export function SignInDialog({ account, colorScheme, start, cancel, close, useAp
     } catch { setCopyResult({ messageKey: 'copyFailed' }) }
   }
   const selectApiKey = () => { useApiKey() }
+  const selectPanuoyun = () => { setRoute('panuoyun'); setFailed(false) }
   const loginPanuoyun = () => {
     if (panuoyun === undefined) return
     void run(async () => {
@@ -95,6 +97,10 @@ export function SignInDialog({ account, colorScheme, start, cancel, close, useAp
     if (panuoyun === undefined) return
     void run(async () => {
       await panuoyun.signOut()
+      setPassword('')
+      setApiKey('')
+      setGroups([])
+      setGroupId('')
       setPanuoyunStep('login')
     })
   }
@@ -113,6 +119,7 @@ export function SignInDialog({ account, colorScheme, start, cancel, close, useAp
       {error && <p role="alert">{t(failureKey)}</p>}
     </div>
     <div className={css.actions}>
+      <Button variant="outline" className={css.secondaryButton} disabled={busy} onClick={signOutPanuoyun}>{t('panuoyunSignOut')}</Button>
       <Button variant="outline" className={css.secondaryButton} disabled={busy} onClick={() => { setRoute('deepseek'); setFailed(false) }}>{t('deepSeekAccount')}</Button>
       <Button variant="outline" className={css.secondaryButton} disabled={busy} onClick={selectApiKey}>{t('addApiKey')}</Button>
       <Button variant="primary" className={css.primaryButton} disabled={busy || email.length === 0 || password.length === 0 || (mode === 'enterprise' && origin.length === 0)} onClick={loginPanuoyun}>{t('signIn')}</Button>
@@ -140,7 +147,7 @@ export function SignInDialog({ account, colorScheme, start, cancel, close, useAp
           <IconCloseOutlineRegular size={14} />
         </button>
       </div>
-      {route === 'panuoyun' && !active && !expired ? panuoyunForm : waiting ? <p className={css.description}>
+      {route === 'panuoyun' && !active ? panuoyunForm : waiting ? <p className={css.description}>
         {t('browserPrompt')}<button type="button" className={css.link} disabled={!authorizeUrl}
           onClick={authorizeUrl ? () => { void copyLink(authorizeUrl) } : undefined}>
           {t(copyResult?.messageKey ?? 'copyLink')}
@@ -149,9 +156,11 @@ export function SignInDialog({ account, colorScheme, start, cancel, close, useAp
         {error ? t(failureKey) : expired ? t('timeoutDescription') : t('loginDescription')}
       </p>}
     </div>
-    {(route !== 'panuoyun' || active || expired) && <div className={css.actions}>
+    {(route !== 'panuoyun' || active) && <div className={css.actions}>
       <Button variant="outline" className={css.secondaryButton} disabled={committing || busy}
         onClick={active ? dismiss : selectApiKey}>{t(active ? 'cancel' : 'addApiKey')}</Button>
+      {route === 'deepseek' && !active && panuoyun !== undefined && <Button variant="outline" className={css.secondaryButton}
+        onClick={selectPanuoyun}>{t('panuoyunTitle')}</Button>}
       <Button variant="primary" className={css.primaryButton} disabled={busy || committing || waiting || account.view === undefined}
         aria-label={waiting ? t('waiting') : undefined} onClick={() => { void run(retry) }}>
         {waiting ? <IconLoadingOutlineRegular className={css.spinner} /> : t(expired || error ? 'retry' : 'signIn')}

@@ -46,6 +46,29 @@ it('defaults to Pa诺云 and creates a dedicated group key without listing keys'
   expect(document.body.textContent).not.toContain('password-secret')
   expect(screen.queryByText(/key list/i)).toBeNull()
 })
+it('switches from DeepSeek back to Pa诺云 in the same dialog after an abandoned route', () => {
+  const panuoyun = {
+    configure: vi.fn(async () => {}), login: vi.fn(async () => {}), groups: vi.fn(async () => []),
+    selectApiKey: vi.fn(async () => {}), createApiKey: vi.fn(async () => {}), signOut: vi.fn(async () => {}),
+  }
+  const props = dialogProps(null)
+  render(<SignInDialog {...props} panuoyun={panuoyun} />)
+  fireEvent.click(screen.getByRole('button', { name: en.deepSeekAccount }))
+  expect(screen.getByRole('dialog', { name: en.loginTitle })).toBeTruthy()
+  fireEvent.click(screen.getByRole('button', { name: en.panuoyunTitle }))
+  expect(screen.getByRole('dialog', { name: en.panuoyunTitle })).toBeTruthy()
+  expect(screen.getByLabelText(en.panuoyunEmail)).toBeTruthy()
+})
+it('offers Pa诺云 sign out when the dialog is reopened before a new login', async () => {
+  const panuoyun = {
+    configure: vi.fn(async () => {}), login: vi.fn(async () => {}), groups: vi.fn(async () => []),
+    selectApiKey: vi.fn(async () => {}), createApiKey: vi.fn(async () => {}), signOut: vi.fn(async () => {}),
+  }
+  const props = dialogProps(null)
+  render(<SignInDialog {...props} panuoyun={panuoyun} />)
+  fireEvent.click(screen.getByRole('button', { name: en.panuoyunSignOut }))
+  await waitFor(() => { expect(panuoyun.signOut).toHaveBeenCalledOnce() })
+})
 it.each([en, zh])('offers sign in or the existing API key editor', async (copy) => {
   const props = mount(null, copy)
   await expect(`${screen.getByRole('dialog').textContent}\n`).toMatchFileSnapshot(`./expected/login-${copy === en ? 'en' : 'zh'}.txt`)
