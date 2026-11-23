@@ -2503,6 +2503,9 @@ importers:
       '@deepseek-ai/dsh-otel':
         specifier: workspace:*
         version: link:../../telemetry/otel
+      '@deepseek-ai/dsh-panuoyun-account':
+        specifier: workspace:*
+        version: link:../../credentials/panuoyun-account
       '@deepseek-ai/dsh-permission-presets':
         specifier: workspace:*
         version: link:../../interaction/permission-presets
