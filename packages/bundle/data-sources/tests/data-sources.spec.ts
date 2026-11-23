@@ -2,7 +2,8 @@ import { mkdtemp, mkdir, rm, symlink, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { describe, expect, it, vi } from 'vitest'
-import { Config as BundleConfig } from '../src/index.ts'
+import { Context } from '@deepseek-ai/cordis'
+import { Config as BundleConfig, DataSourcesRemote } from '../src/index.ts'
 import { LocalDirectoryConnector } from '../src/local-directory.ts'
 import { ConnectorSupervisor, type ConnectorRequest, type ReadConnector } from '../src/supervisor.ts'
 import type { ReadOperation, SourceConfig, SourceKind } from '../src/types.ts'
@@ -55,6 +56,27 @@ function connector(kind: SourceKind): ReadConnector {
 }
 
 describe('read-only data source supervisor', () => {
+  it('exposes a redacted remote probe result backed by the same supervisor', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'dsh-data-source-remote-'))
+    const ctx = new Context()
+    try {
+      const configured: SourceConfig = {
+        ...source('local-directory'), policy: { maxBytes: 10, maxRows: 1, allowedPath: root },
+      }
+      const remote = new DataSourcesRemote(
+        ctx,
+        new ConnectorSupervisor([configured], [new LocalDirectoryConnector()], { resolve: async () => undefined }),
+      )
+      await expect(remote.probe({ sourceId: configured.id }, AbortSignal.timeout(1_000))).resolves.toMatchObject({
+        ok: true, source: { id: configured.id, revision: '1' }, connector: 'local-directory',
+      })
+      await expect(remote.probe({ sourceId: '../secret' }, AbortSignal.timeout(1_000))).resolves.toEqual({ ok: false, message: 'Invalid source identifier.' })
+    } finally {
+      await ctx.fiber.dispose()
+      await rm(root, { recursive: true, force: true })
+    }
+  })
+
   it('retains credentialRef when the Loader schema constructs external source configuration', () => {
     const parsed = new BundleConfig({ sources: [{
       ...source('postgresql'), credentialRef: 'DATA_SOURCE_TEST',

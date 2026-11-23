@@ -47,7 +47,7 @@ export interface DataSourcesCardFace {
   test: (sourceId: string) => void
 }
 
-type ProbeResponse = { ok: boolean; value?: unknown; error?: { message?: string } }
+type ProbeResponse = { ok: boolean; value?: { ok: boolean; message?: string }; error?: { message?: string } }
 type ProbeRemote = { dataSources?: { probe: (request: { sourceId: string }) => Promise<ProbeResponse> } }
 
 const kinds: readonly SourceKind[] = ['local-directory', 's3', 'sftp', 'mysql', 'postgresql']
@@ -164,7 +164,9 @@ export class DataSourcesSettingsController {
     this.probes = { ...this.probes, [sourceId]: { pending: true, message: 'Testing connection…' } }
     this.publish()
     void probe({ sourceId }).then((response) => {
-      const message = response.ok ? 'Connection succeeded.' : response.error?.message ?? 'Connection failed.'
+      const message = response.ok && response.value?.ok
+        ? 'Connection succeeded.'
+        : response.value?.message ?? response.error?.message ?? 'Connection failed.'
       this.probes = { ...this.probes, [sourceId]: { pending: false, message } }
       this.publish()
     }, () => {

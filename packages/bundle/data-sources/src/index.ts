@@ -1,6 +1,7 @@
 import type { Context } from '@deepseek-ai/cordis'
 import z from '@deepseek-ai/schemastery'
 import { createMcpToolDefinition } from '@deepseek-ai/dsh-mcp-client'
+import { Remote, TypertRemoteService } from '@deepseek-ai/dsh-typert-protocol'
 import type {} from '@deepseek-ai/dsh-credentials'
 import type {} from '@deepseek-ai/dsh-tools'
 import { LocalDirectoryConnector } from './local-directory.ts'
@@ -9,6 +10,7 @@ import { SftpConnector } from './sftp.ts'
 import { MysqlConnector } from './mysql.ts'
 import { PostgreSqlConnector } from './postgresql.ts'
 import { ConnectorSupervisor } from './supervisor.ts'
+import type { DataSourcesProbeResult } from './api.ts'
 import type { ReadRequest, SourceConfig } from './types.ts'
 
 export const name = 'data-sources'
@@ -58,6 +60,30 @@ function mcpText(value: unknown): { content: { type: 'text'; text: string }[] } 
   return { content: [{ type: 'text', text: JSON.stringify(value) }] }
 }
 
+declare module '@deepseek-ai/cordis' {
+  interface Context { dataSources: DataSourcesRemote }
+}
+
+/** Browser-safe remote surface: probes disclose no credentials, paths, or provider errors. */
+export class DataSourcesRemote extends TypertRemoteService {
+  constructor(ctx: Context, private readonly supervisor: ConnectorSupervisor) {
+    super(ctx, 'dataSources')
+  }
+
+  @Remote
+  async probe(request: { sourceId: string }, signal: AbortSignal): Promise<DataSourcesProbeResult> {
+    signal.throwIfAborted()
+    if (!/^[A-Za-z0-9_-]{1,64}$/.test(request.sourceId)) return { ok: false, message: 'Invalid source identifier.' }
+    try {
+      const result = await this.supervisor.probe(request.sourceId)
+      signal.throwIfAborted()
+      return { ok: true, source: result.source, connector: result.connector, observedAt: result.observedAt }
+    } catch {
+      return { ok: false, message: 'Connection test failed.' }
+    }
+  }
+}
+
 /** Register native read tools through the MCP result adapter so every result has one canonical projection. */
 function applyDataSourceTools(ctx: Context, supervisor: ConnectorSupervisor): void {
   ctx.effect(() => ctx.tools.register(createMcpToolDefinition(ctx, {
@@ -87,5 +113,6 @@ export function apply(ctx: Context, config: Config): void {
   const supervisor = new ConnectorSupervisor(config.sources, [
     new LocalDirectoryConnector(), new S3Connector(), new SftpConnector(), new MysqlConnector(), new PostgreSqlConnector(),
   ], ctx.credentials)
+  new DataSourcesRemote(ctx, supervisor)
   applyDataSourceTools(ctx, supervisor)
 }
