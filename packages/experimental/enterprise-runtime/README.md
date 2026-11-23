@@ -11,7 +11,7 @@ This experimental Host plugin stores validated declarative enterprise ZIP payloa
 
 ## Use this package
 
-The companion first-level bundle mounts this Host row and a Web contribution beneath its Plugin Manager sidebar detail page. Plugin Manager owns installation and selection of that first-level bundle. The `EnterpriseRuntimeService.api` facade is the v1 Host integration surface; it exposes inventory, activation, uninstallation, and invocation without exposing a Cordis Context or provider object. This runtime owns its separate `storageDir` and persists package inventory and payloads there.
+The companion first-level bundle mounts this Host row and a Web contribution beneath its Plugin Manager sidebar detail page. Plugin Manager owns installation and selection of that first-level bundle. The `EnterpriseRuntimeService.api` facade is the v1 Host integration surface; trusted first-level code can install a ZIP through its existing validation and atomic-publish pipeline, then list, activate, uninstall, and invoke capabilities. It exposes neither a Cordis Context nor provider objects, and the static client slot receives no ZIP payload or installation capability. This runtime owns its separate `storageDir` and persists package inventory and payloads there.
 
 A second-level ZIP contains `manifest.json` with `id`, `version`, `runtimeApi`, `dependencies`, `permissions`, and `entry`; the entry is a JSON list, detail, chart, or report template. Details declare visible fields; charts declare `bar`, `line`, or `pie` plus x/y fields; reports declare ordered sections. The runtime bounds archive bytes, member count and unpacked bytes, rejects absolute, parent and backslash paths, and accepts only `data.read` permission and `runtimeApi: "1"`.
 

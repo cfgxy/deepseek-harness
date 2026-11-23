@@ -34,22 +34,23 @@ async function fixture(name: string): Promise<Uint8Array> {
 }
 
 describe('enterprise runtime', () => {
-  it('mounts real Cordis tools, swaps an active registration, and restores inventory without activating it', async () => {
+  it('installs through the v1 facade, mounts real tools, swaps active registrations, and restores inactive inventory', async () => {
     const service = await runtime()
-    await service.install(await fixture('basic.zip'))
-    service.activate('acme.orders', '1.0.0')
+    await service.api.install(await fixture('basic.zip'))
+    expect(service.api.list()).toHaveLength(1)
+    service.api.activate('acme.orders', '1.0.0')
     const firstTool = capabilityToolName('acme.orders', '1.0.0')
     const registered = ctx!.tools.get(firstTool)
     expect(registered).toBeDefined()
     await expect(registered!.execute({}, { signal: new AbortController().signal } as never)).resolves.toEqual({ template: { kind: 'list', title: 'Orders' } })
-    expect(await service.invoke('acme.orders', new AbortController().signal)).toEqual({ template: { kind: 'list', title: 'Orders' } })
+    expect(await service.api.invoke('acme.orders', new AbortController().signal)).toEqual({ template: { kind: 'list', title: 'Orders' } })
 
-    await service.install(await fixture('update.zip'))
-    service.activate('acme.orders', '2.0.0')
+    await service.api.install(await fixture('update.zip'))
+    service.api.activate('acme.orders', '2.0.0')
     const secondTool = capabilityToolName('acme.orders', '2.0.0')
     expect(ctx!.tools.get(firstTool)).toBeUndefined()
     expect(ctx!.tools.get(secondTool)).toBeDefined()
-    expect(await service.invoke('acme.orders', new AbortController().signal)).toEqual({ template: { kind: 'list', title: 'Orders v2' } })
+    expect(await service.api.invoke('acme.orders', new AbortController().signal)).toEqual({ template: { kind: 'list', title: 'Orders v2' } })
 
     await ctx!.fiber.dispose()
     ctx = new Context()
@@ -57,15 +58,15 @@ describe('enterprise runtime', () => {
     await ctx.plugin(ToolRuntime)
     await ctx.plugin(EnterpriseRuntimeService, { storageDir: directory! })
     await ctx.enterpriseRuntime.load()
-    expect(ctx.enterpriseRuntime.list()).toHaveLength(2)
-    expect(await ctx.enterpriseRuntime.invoke('acme.orders', new AbortController().signal)).toBeInstanceOf(RuntimeError)
+    expect(ctx.enterpriseRuntime.api.list()).toHaveLength(2)
+    expect(await ctx.enterpriseRuntime.api.invoke('acme.orders', new AbortController().signal)).toBeInstanceOf(RuntimeError)
   })
 
-  it('preserves the old active tool when the new registration fails', async () => {
+  it('preserves the old active tool when facade activation of the new registration fails', async () => {
     const service = await runtime()
-    await service.install(await fixture('basic.zip'))
-    await service.install(await fixture('update.zip'))
-    service.activate('acme.orders', '1.0.0')
+    await service.api.install(await fixture('basic.zip'))
+    await service.api.install(await fixture('update.zip'))
+    service.api.activate('acme.orders', '1.0.0')
     const candidate = capabilityToolName('acme.orders', '2.0.0')
     ctx!.tools.register(defineTool({
       name: candidate,
@@ -74,18 +75,18 @@ describe('enterprise runtime', () => {
       output: { schema: { type: 'string' }, render: (_args, value) => [{ type: 'text', text: value }] },
       async execute() { return 'collision' },
     }))
-    expect(() => service.activate('acme.orders', '2.0.0')).toThrow()
+    expect(() => service.api.activate('acme.orders', '2.0.0')).toThrow()
     expect(ctx!.tools.get(capabilityToolName('acme.orders', '1.0.0'))).toBeDefined()
-    expect(await service.invoke('acme.orders', new AbortController().signal)).toEqual({ template: { kind: 'list', title: 'Orders' } })
+    expect(await service.api.invoke('acme.orders', new AbortController().signal)).toEqual({ template: { kind: 'list', title: 'Orders' } })
   })
 
-  it('rejects traversal, duplicate versions and invalid candidate payloads without publishing them', async () => {
+  it('keeps facade validation failures and rollbacks from publishing payloads', async () => {
     const service = await runtime()
-    await expect(service.install(await fixture('traversal.zip'))).rejects.toThrow('unsafe-path')
-    await service.install(await fixture('basic.zip'))
-    await expect(service.install(await fixture('basic.zip'))).rejects.toThrow('duplicate-package-version')
-    await expect(service.install(await fixture('bad-update.zip'))).rejects.toThrow('template-invalid')
-    expect(service.list()).toHaveLength(1)
+    await expect(service.api.install(await fixture('traversal.zip'))).rejects.toThrow('unsafe-path')
+    await service.api.install(await fixture('basic.zip'))
+    await expect(service.api.install(await fixture('basic.zip'))).rejects.toThrow('duplicate-package-version')
+    await expect(service.api.install(await fixture('bad-update.zip'))).rejects.toThrow('template-invalid')
+    expect(service.api.list()).toHaveLength(1)
   })
 
   it('supports declarative details, charts, reports, and a connector-free Langfuse question', async () => {
@@ -98,17 +99,17 @@ describe('enterprise runtime', () => {
       },
     }
     const service = await runtime(source)
-    for (const name of ['detail.zip', 'chart.zip', 'langfuse-report.zip']) await service.install(await fixture(name))
+    for (const name of ['detail.zip', 'chart.zip', 'langfuse-report.zip']) await service.api.install(await fixture(name))
     for (const [id, version] of [['acme.order-detail', '1.0.0'], ['acme.order-chart', '1.0.0'], ['acme.langfuse-question', '1.0.0']] as const) {
-      service.activate(id, version)
+      service.api.activate(id, version)
     }
     await expect(service.api.invoke('acme.order-detail', new AbortController().signal)).resolves.toMatchObject({
       template: { kind: 'detail', fields: ['id', 'status'] }, rows: [{ value: 12 }],
     })
-    await expect(service.invoke('acme.order-chart', new AbortController().signal)).resolves.toMatchObject({
+    await expect(service.api.invoke('acme.order-chart', new AbortController().signal)).resolves.toMatchObject({
       template: { kind: 'chart', chart: 'bar', x: 'status', y: 'count' },
     })
-    await expect(service.invoke('acme.langfuse-question', new AbortController().signal)).resolves.toMatchObject({
+    await expect(service.api.invoke('acme.langfuse-question', new AbortController().signal)).resolves.toMatchObject({
       template: { kind: 'report', title: 'Langfuse trace volume' },
     })
     expect(observed).toContainEqual({ source: 'langfuse', question: 'How many traces were recorded in the selected period?' })
@@ -116,9 +117,9 @@ describe('enterprise runtime', () => {
 
   it('reports an absent data source and projects only rows from an optional provider', async () => {
     const missing = await runtime()
-    await missing.install(await fixture('query.zip'))
-    missing.activate('acme.query-orders', '1.0.0')
-    await expect(missing.invoke('acme.query-orders', new AbortController().signal)).resolves.toMatchObject({ message: 'data-source-unavailable' })
+    await missing.api.install(await fixture('query.zip'))
+    missing.api.activate('acme.query-orders', '1.0.0')
+    await expect(missing.api.invoke('acme.query-orders', new AbortController().signal)).resolves.toMatchObject({ message: 'data-source-unavailable' })
     await ctx!.fiber.dispose()
 
     const source: DataSourceApiV1 = {
@@ -126,9 +127,9 @@ describe('enterprise runtime', () => {
       async execute() { return { rows: [{ id: 'o-1' }] } },
     }
     const service = await runtime(source)
-    await service.install(await fixture('query.zip'))
-    service.activate('acme.query-orders', '1.0.0')
-    expect(await service.invoke('acme.query-orders', new AbortController().signal)).toEqual({
+    await service.api.install(await fixture('query.zip'))
+    service.api.activate('acme.query-orders', '1.0.0')
+    expect(await service.api.invoke('acme.query-orders', new AbortController().signal)).toEqual({
       template: { kind: 'list', title: 'Query orders', dataAction: 'query' }, rows: [{ id: 'o-1' }],
     })
   })

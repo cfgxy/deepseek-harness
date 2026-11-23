@@ -67,6 +67,8 @@ export type RuntimeTemplate = ListTemplate | DetailTemplate | ChartTemplate | Re
 /** Stable facade for first-level Plugin Manager, Host, and client integrations. */
 export interface EnterpriseRuntimeApiV1 {
   readonly apiVersion: '1'
+  /** Install a trusted first-level ZIP through the service's validated, atomic pipeline. */
+  install(zip: Uint8Array): Promise<RuntimeManifest>
   list(): readonly RuntimeManifest[]
   activate(id: string, version: string): void
   uninstall(id: string): Promise<void>
@@ -117,9 +119,10 @@ export class EnterpriseRuntimeService extends Service {
   private readonly limits: Required<Omit<Config, 'storageDir'>>
   private inventory: Inventory = { packages: {} }
   private readonly active = new Map<string, ActiveCapability>()
-  /** Public v1 facade for first-level integrations; ZIP content never receives it. */
+  /** Public v1 facade for trusted first-level integrations; ZIP content and static client slots never receive it. */
   readonly api: EnterpriseRuntimeApiV1 = {
     apiVersion: '1',
+    install: zip => this.install(zip),
     list: () => this.list(),
     activate: (id, version) => this.activate(id, version),
     uninstall: id => this.uninstall(id),
