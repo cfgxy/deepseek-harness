@@ -1,7 +1,7 @@
 import { credentialRef } from '@deepseek-ai/dsh-credentials'
 import { randomUUID } from '@deepseek-ai/dsh-util-crypto'
 import { guardRead } from './policy.ts'
-import { assertSourceConfig, type ReadRequest, type ReadResult, type SourceConfig, type SourceKind } from './types.ts'
+import { assertSourceConfig, type ReadRequest, type ReadResult, type SourceConfig, type SourceKind, type SourcePolicy } from './types.ts'
 
 export interface ConnectorRequest {
   source: SourceConfig
@@ -40,7 +40,7 @@ export class ConnectorSupervisor {
     return [...this.#sources.values()].map(({ id, revision, kind, label, enabled }) => ({ id, revision, kind, label, enabled }))
   }
 
-  inspect(sourceId: string): Pick<SourceConfig, 'id' | 'revision' | 'kind' | 'label' | 'enabled' | 'policy'> {
+  inspect(sourceId: string): Pick<SourceConfig, 'id' | 'revision' | 'kind' | 'label' | 'enabled'> & { policy: Pick<SourcePolicy, 'maxBytes' | 'maxRows'> } {
     const source = this.#source(sourceId)
     return {
       id: source.id,
@@ -48,7 +48,7 @@ export class ConnectorSupervisor {
       kind: source.kind,
       label: source.label,
       enabled: source.enabled,
-      policy: { ...source.policy },
+      policy: { maxBytes: source.policy.maxBytes, maxRows: source.policy.maxRows },
     }
   }
 

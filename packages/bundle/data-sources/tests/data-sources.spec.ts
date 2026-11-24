@@ -139,6 +139,22 @@ describe('read-only data source supervisor', () => {
     }
   })
 
+  it('projects source inspection without connection coordinates or allowed roots', () => {
+    const configured: SourceConfig = {
+      ...source('s3'), credentialRef: 'DATA_SOURCE_TEST',
+      connection: { endpoint: 'https://internal.invalid', bucket: 'private' },
+      policy: { maxBytes: 1024, maxRows: 10, allowedPrefix: 'private/' },
+    }
+    const supervisor = new ConnectorSupervisor([configured], [connector('s3')], { resolve: async () => undefined })
+    const text = JSON.stringify(supervisor.inspect(configured.id))
+    expect(text).toContain('maxBytes')
+    expect(text).not.toContain('allowedPath')
+    expect(text).not.toContain('allowedPrefix')
+    expect(text).not.toContain('private/')
+    expect(text).not.toContain('internal.invalid')
+    expect(text).not.toContain('DATA_SOURCE_TEST')
+  })
+
   it('retains credentialRef when the Loader schema constructs external source configuration', () => {
     const parsed = new BundleConfig({ sources: [{
       ...source('postgresql'), credentialRef: 'DATA_SOURCE_TEST',
