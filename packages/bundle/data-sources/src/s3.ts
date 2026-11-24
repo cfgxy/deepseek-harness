@@ -15,6 +15,29 @@ const sha = (value: string | Uint8Array) => createHash('sha256').update(value).d
 const hmac = (key: string | Buffer, value: string) => createHmac('sha256', key).update(value).digest()
 function encodeKey(key: string): string { return key.split('/').map(encodeURIComponent).join('/') }
 
+async function readAtMost(response: Response, maxBytes: number): Promise<{ bytes: Uint8Array; truncated: boolean }> {
+  if (response.body === null) return { bytes: new Uint8Array(), truncated: false }
+  const reader = response.body.getReader()
+  const chunks: Uint8Array[] = []
+  let size = 0
+  try {
+    while (size <= maxBytes) {
+      const next = await reader.read()
+      if (next.done) return { bytes: Uint8Array.from(chunks.flatMap(chunk => [...chunk])), truncated: false }
+      const remaining = maxBytes + 1 - size
+      const chunk = next.value.subarray(0, remaining)
+      chunks.push(chunk)
+      size += chunk.byteLength
+      if (size > maxBytes) {
+        await reader.cancel()
+        const bytes = Uint8Array.from(chunks.flatMap(value => [...value])).subarray(0, maxBytes)
+        return { bytes, truncated: true }
+      }
+    }
+    return { bytes: new Uint8Array(), truncated: false }
+  } finally { reader.releaseLock() }
+}
+
 /** Minimal SigV4 S3-compatible reader. It deliberately exposes no put/delete/copy operation. */
 export class S3Connector implements ReadConnector {
   readonly kind = 's3' as const
@@ -26,7 +49,7 @@ export class S3Connector implements ReadConnector {
     const key = String(request.request.input.path)
     if (request.request.operation === 'catalog') {
       const prefix = String(request.source.policy.allowedPrefix)
-      const response = await this.#request(request, '', `list-type=2&prefix=${encodeURIComponent(prefix)}`)
+      const response = await this.#request(request, '', `list-type=2&prefix=${encodeURIComponent(prefix)}&max-keys=${request.request.maxRows! + 1}`)
       if (!response.ok) throw new Error(`data-sources: S3 catalog failed (${response.status})`)
       const xml = await response.text()
       const listed = [...xml.matchAll(/<Key>([^<]+)<\/Key>/g)].map(x => x[1]!)
@@ -38,13 +61,12 @@ export class S3Connector implements ReadConnector {
       }
       return { data: { keys }, truncated: truncated || listed.length > keys.length }
     }
-    const response = await this.#request(request, key)
+    const response = await this.#request(request, key, '', { range: `bytes=0-${request.request.maxBytes!}` })
     if (!response.ok) throw new Error(`data-sources: S3 object read failed (${response.status})`)
-    const bytes = new Uint8Array(await response.arrayBuffer())
-    const bounded = bytes.subarray(0, request.request.maxBytes)
-    return { data: { path: key, bytes: bounded.byteLength, content: new TextDecoder().decode(bounded) }, truncated: bytes.byteLength > bounded.byteLength }
+    const { bytes, truncated } = await readAtMost(response, request.request.maxBytes!)
+    return { data: { path: key, bytes: bytes.byteLength, content: new TextDecoder().decode(bytes) }, truncated }
   }
-  async #request(request: Omit<ConnectorRequest, 'request'> | ConnectorRequest, key: string, query = ''): Promise<Response> {
+  async #request(request: Omit<ConnectorRequest, 'request'> | ConnectorRequest, key: string, query = '', extraHeaders: Record<string, string> = {}): Promise<Response> {
     const { endpoint, bucket, region = 'us-east-1' } = request.source.connection!
     const credentials = credential(request.credential)
     const base = new URL(endpoint!)
@@ -54,7 +76,7 @@ export class S3Connector implements ReadConnector {
     const now = new Date(); const stamp = now.toISOString().replace(/[:-]|\.\d{3}/g, '')
     const date = stamp.slice(0, 8)
     const payloadHash = sha('')
-    const headers: Record<string, string> = { host: base.host, 'x-amz-content-sha256': payloadHash, 'x-amz-date': stamp }
+    const headers: Record<string, string> = { host: base.host, 'x-amz-content-sha256': payloadHash, 'x-amz-date': stamp, ...extraHeaders }
     if (credentials.sessionToken) headers['x-amz-security-token'] = credentials.sessionToken
     const signed = Object.keys(headers).sort()
     const canonicalHeaders = signed.map(key => `${key}:${headers[key]}\n`).join('')

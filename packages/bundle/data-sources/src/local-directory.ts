@@ -1,4 +1,4 @@
-import { readdir, readFile, realpath, stat } from 'node:fs/promises'
+import { open, readdir, realpath, stat } from 'node:fs/promises'
 import type { Dirent } from 'node:fs'
 import { resolve, sep } from 'node:path'
 import type { ConnectorRequest, ReadConnector } from './supervisor.ts'
@@ -62,11 +62,16 @@ export class LocalDirectoryConnector implements ReadConnector {
       throw new Error(`data-sources: ${request.request.operation} is not implemented by local-directory`)
     }
     if (!(await stat(target)).isFile()) throw new Error(`data-sources: ${target} is not a regular file`)
-    const content = await readFile(target)
-    const bounded = content.subarray(0, maxBytes)
-    return {
-      data: { path: target, bytes: bounded.byteLength, content: bounded.toString('utf8') },
-      truncated: bounded.byteLength !== content.byteLength,
-    }
+    const handle = await open(target, 'r')
+    try {
+      // One extra byte is sufficient to distinguish an exact-size file from a truncated result.
+      const content = Buffer.allocUnsafe(maxBytes + 1)
+      const { bytesRead } = await handle.read(content, 0, content.byteLength, 0)
+      const bounded = content.subarray(0, Math.min(bytesRead, maxBytes))
+      return {
+        data: { path: target, bytes: bounded.byteLength, content: bounded.toString('utf8') },
+        truncated: bytesRead > maxBytes,
+      }
+    } finally { await handle.close() }
   }
 }

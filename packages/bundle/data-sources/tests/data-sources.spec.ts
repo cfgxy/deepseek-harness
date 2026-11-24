@@ -5,6 +5,7 @@ import tls from 'node:tls'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { createServer } from 'node:net'
+import { createServer as createHttpServer } from 'node:http'
 import https from 'node:https'
 import { describe, expect, it, vi } from 'vitest'
 import { Context } from '@deepseek-ai/cordis'
@@ -273,6 +274,41 @@ describe('read-only data source supervisor', () => {
       await expect(new MysqlConnector().probe({ source: mysql, credential: JSON.stringify({ username: 'fixture', password: 'fixture' }) }))
         .rejects.toThrow('does not support required TLS')
     } finally {
+      await new Promise<void>((resolve, reject) => server.close(error => error === undefined ? resolve() : reject(error)))
+    }
+  })
+
+  it('stops an S3 body after its truncation sentinel and caps catalog keys upstream', async () => {
+    const sockets = new Set<import('node:net').Socket>()
+    let range: string | undefined; let catalogLimit: string | null = null
+    const server = createHttpServer((incoming, response) => {
+      const url = new URL(incoming.url!, 'http://fixture.invalid')
+      if (url.searchParams.get('list-type') === '2') {
+        catalogLimit = url.searchParams.get('max-keys')
+        response.end('<ListBucketResult><Key>reports/a</Key><Key>reports/b</Key><Key>reports/c</Key></ListBucketResult>')
+      } else {
+        range = incoming.headers.range
+        response.write('abcde')
+      }
+    })
+    server.on('connection', socket => sockets.add(socket))
+    await new Promise<void>(resolve => server.listen(0, '127.0.0.1', resolve))
+    const address = server.address()
+    if (address === null || typeof address === 'string') throw new Error('fixture server has no HTTP port')
+    const s3: SourceConfig = {
+      ...source('s3'), connection: { endpoint: `http://127.0.0.1:${address.port}`, bucket: 'fixture', timeoutMs: 1_000 },
+      policy: { maxBytes: 64, maxRows: 2, allowedPrefix: 'reports/' },
+    }
+    const credential = JSON.stringify({ accessKeyId: 'fixture', secretAccessKey: 'fixture' })
+    try {
+      await expect(new S3Connector().execute({ source: s3, credential, request: { apiVersion: 'v1', sourceId: s3.id, operation: 'object.read', input: { path: 'reports/a' }, maxBytes: 4, maxRows: 2 } }))
+        .resolves.toMatchObject({ data: { content: 'abcd', bytes: 4 }, truncated: true })
+      expect(range).toBe('bytes=0-4')
+      await expect(new S3Connector().execute({ source: s3, credential, request: { apiVersion: 'v1', sourceId: s3.id, operation: 'catalog', input: {}, maxBytes: 64, maxRows: 2 } }))
+        .resolves.toMatchObject({ data: { keys: ['reports/a', 'reports/b'] }, truncated: true })
+      expect(catalogLimit).toBe('3')
+    } finally {
+      for (const socket of sockets) socket.destroy()
       await new Promise<void>((resolve, reject) => server.close(error => error === undefined ? resolve() : reject(error)))
     }
   })
