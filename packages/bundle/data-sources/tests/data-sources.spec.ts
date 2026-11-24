@@ -9,7 +9,13 @@ import { createServer as createHttpServer } from 'node:http'
 import https from 'node:https'
 import { describe, expect, it, vi } from 'vitest'
 import { Context } from '@deepseek-ai/cordis'
+import { executeToolFixture } from '@deepseek-ai/dsh-tool-testkit'
+import * as NativeToolExecutor from '@deepseek-ai/dsh-tool-executor-native'
+import { ToolCallId } from '@deepseek-ai/dsh-llm'
+import SystemPrompt from '@deepseek-ai/dsh-system-prompt'
+import ToolRuntime from '@deepseek-ai/dsh-tools'
 import { Config as BundleConfig, DataSourcesRemote } from '../src/index.ts'
+import * as DataSources from '../src/index.ts'
 import { DataSourcesBroker } from '../src/broker.ts'
 import { LocalDirectoryConnector } from '../src/local-directory.ts'
 import { MysqlConnector } from '../src/mysql.ts'
@@ -154,6 +160,43 @@ describe('read-only data source supervisor', () => {
     expect(text).not.toContain('internal.invalid')
     expect(text).not.toContain('DATA_SOURCE_TEST')
   })
+
+  it('starts the frozen Python MCP child through the Host and projects brokered results', async () => {
+    const ctx = new Context()
+    ctx.provide('credentials', { resolve: async () => undefined } as never)
+    await ctx.plugin(SystemPrompt)
+    await ctx.plugin(ToolRuntime)
+    await ctx.plugin(NativeToolExecutor)
+    try {
+      await ctx.plugin(DataSources, { sources: [source('local-directory')] })
+      const listName = 'mcp__data-sources-python__source_list'
+      const infoName = 'mcp__data-sources-python__source_info'
+      const deniedName = 'mcp__data-sources-python__data_read'
+      expect(ctx.tools.get(listName)).toBeDefined()
+      const list = await executeToolFixture(ctx, { signal: AbortSignal.timeout(10_000), callId: ToolCallId('data-list'), name: listName, arguments: {} })
+      expect(JSON.stringify(list)).toContain('local_directory')
+      const info = await executeToolFixture(ctx, { signal: AbortSignal.timeout(10_000), callId: ToolCallId('data-info'), name: infoName, arguments: { source_id: 'local_directory' } })
+      expect(JSON.stringify(info)).not.toContain('/fixtures/')
+      const denied = await executeToolFixture(ctx, { signal: AbortSignal.timeout(10_000), callId: ToolCallId('data-denied'), name: deniedName, arguments: { source_id: 'local_directory', path: '/' } })
+      expect(JSON.stringify(denied)).not.toContain('/fixtures/')
+    } finally {
+      await ctx.fiber.dispose()
+    }
+  }, 30_000)
+
+  it('rolls back the broker and tool generation when the Python child cannot start', async () => {
+    const ctx = new Context()
+    ctx.provide('credentials', { resolve: async () => undefined } as never)
+    await ctx.plugin(SystemPrompt)
+    await ctx.plugin(ToolRuntime)
+    await ctx.plugin(NativeToolExecutor)
+    try {
+      await expect(ctx.plugin(DataSources, { pythonCommand: process.execPath, sources: [source('local-directory')] })).rejects.toThrow()
+      expect(ctx.tools.get('mcp__data-sources-python__source_list')).toBeUndefined()
+    } finally {
+      await ctx.fiber.dispose()
+    }
+  }, 30_000)
 
   it('retains credentialRef when the Loader schema constructs external source configuration', () => {
     const parsed = new BundleConfig({ sources: [{
