@@ -167,19 +167,32 @@ describe('read-only data source supervisor', () => {
     await ctx.plugin(SystemPrompt)
     await ctx.plugin(ToolRuntime)
     await ctx.plugin(NativeToolExecutor)
+    let dataSources: ReturnType<typeof ctx.plugin> | undefined
     try {
-      await ctx.plugin(DataSources, { sources: [source('local-directory')] })
+      dataSources = ctx.plugin(DataSources, { sources: [source('local-directory')] })
+      await dataSources
       const listName = 'mcp__data-sources-python__source_list'
       const infoName = 'mcp__data-sources-python__source_info'
       const deniedName = 'mcp__data-sources-python__data_read'
       expect(ctx.tools.get(listName)).toBeDefined()
       const list = await executeToolFixture(ctx, { signal: AbortSignal.timeout(10_000), callId: ToolCallId('data-list'), name: listName, arguments: {} })
       expect(JSON.stringify(list)).toContain('local_directory')
+      expect(list.isError).toBe(false)
       const info = await executeToolFixture(ctx, { signal: AbortSignal.timeout(10_000), callId: ToolCallId('data-info'), name: infoName, arguments: { source_id: 'local_directory' } })
+      expect(info.isError).toBe(false)
+      expect(JSON.stringify(info)).toContain('maxBytes')
       expect(JSON.stringify(info)).not.toContain('/fixtures/')
-      const denied = await executeToolFixture(ctx, { signal: AbortSignal.timeout(10_000), callId: ToolCallId('data-denied'), name: deniedName, arguments: { source_id: 'local_directory', path: '/' } })
+      const denied = await executeToolFixture(ctx, { signal: AbortSignal.timeout(10_000), callId: ToolCallId('data-denied'), name: deniedName, arguments: { source_id: 'local_directory', object_id: 'opaque-1' } })
+      expect(denied.isError).toBe(true)
+      expect(JSON.stringify(denied)).toContain('broker rejected the operation')
       expect(JSON.stringify(denied)).not.toContain('/fixtures/')
+      await dataSources.dispose()
+      dataSources = undefined
+      expect(ctx.tools.get(listName)).toBeUndefined()
+      expect(ctx.tools.get(infoName)).toBeUndefined()
+      expect(ctx.tools.get(deniedName)).toBeUndefined()
     } finally {
+      await dataSources?.dispose()
       await ctx.fiber.dispose()
     }
   }, 30_000)
