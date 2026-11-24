@@ -1,5 +1,7 @@
-import type { Context } from '@deepseek-ai/cordis'
+import { fileURLToPath } from 'node:url'
+import type { Context, Fiber } from '@deepseek-ai/cordis'
 import z from '@deepseek-ai/schemastery'
+import * as McpClient from '@deepseek-ai/dsh-mcp-client'
 import { createMcpToolDefinition } from '@deepseek-ai/dsh-mcp-client'
 import { Remote, TypertRemoteService } from '@deepseek-ai/dsh-typert-protocol'
 import type {} from '@deepseek-ai/dsh-credentials'
@@ -10,6 +12,7 @@ import { SftpConnector } from './sftp.ts'
 import { MysqlConnector } from './mysql.ts'
 import { PostgreSqlConnector } from './postgresql.ts'
 import { ConnectorSupervisor } from './supervisor.ts'
+import { DataSourcesBroker, type BrokerBootstrap, type BrokerRequest } from './broker.ts'
 import type { DataSourcesProbeResult } from './api.ts'
 import type { ReadRequest, SourceConfig } from './types.ts'
 
@@ -18,6 +21,7 @@ export const inject = ['tools', 'credentials']
 
 export interface Config {
   sources: SourceConfig[]
+  pythonCommand?: string
 }
 
 const Policy = z.object({
@@ -28,6 +32,7 @@ const Policy = z.object({
 })
 
 export const Config: z<Config> = z.object({
+  pythonCommand: z.string().default('uv'),
   sources: z.array(z.object({
     id: z.string().required(),
     revision: z.string().required(),
@@ -56,6 +61,23 @@ const requestSchema = {
     maxRows: { type: 'integer', minimum: 1 },
   },
 } as const
+
+function pythonEnvironment(bootstrap: BrokerBootstrap): Record<string, string> {
+  const address = bootstrap.endpoint.transport === 'unix' ? bootstrap.endpoint.path : `tcp://${bootstrap.endpoint.host}:${bootstrap.endpoint.port}`
+  return { DSH_DATA_SOURCES_BROKER: address, DSH_DATA_SOURCES_BROKER_CAPABILITY: bootstrap.capability }
+}
+
+async function admitBrokerOperation(supervisor: ConnectorSupervisor, request: BrokerRequest): Promise<unknown> {
+  const sourceId = request.arguments.source_id
+  if (request.operation === 'source_list') return supervisor.list()
+  if (typeof sourceId !== 'string') throw new Error('data-sources: broker source_id is required')
+  if (request.operation === 'source_info') return supervisor.inspect(sourceId)
+  if (request.operation === 'source_probe') return await supervisor.probe(sourceId)
+  // The remaining vocabulary is deliberately deny-by-default until its object-ID,
+  // query-scope and DuckDB attachment admission is implemented in the Host.
+  throw new Error('data-sources: broker operation is not admitted')
+}
+
 
 function mcpText(value: unknown): { content: { type: 'text'; text: string }[] } {
   return { content: [{ type: 'text', text: JSON.stringify(value) }] }
@@ -109,11 +131,27 @@ function applyDataSourceTools(ctx: Context, supervisor: ConnectorSupervisor): vo
   })))
 }
 
-/** Install configuration-owned tools and the five independently lifecycle-owned read connectors. */
-export function apply(ctx: Context, config: Config): void {
+/** Install native compatibility tools and a lifecycle-owned, capability-gated Python MCP child. */
+export async function apply(ctx: Context, config: Config): Promise<void> {
   const supervisor = new ConnectorSupervisor(config.sources, [
     new LocalDirectoryConnector(), new S3Connector(), new SftpConnector(), new MysqlConnector(), new PostgreSqlConnector(),
   ], ctx.credentials)
   new DataSourcesRemote(ctx, supervisor)
   applyDataSourceTools(ctx, supervisor)
+  const broker = new DataSourcesBroker((request, signal) => {
+    signal.throwIfAborted()
+    return admitBrokerOperation(supervisor, request)
+  })
+  const bootstrap = await broker.start()
+  const cwd = fileURLToPath(new URL('../python', import.meta.url))
+  let child!: Fiber
+  ctx.effect(function* () {
+    child = ctx.plugin(McpClient, McpClient.Config({
+      transport: 'stdio', serverName: 'data-sources-python', command: config.pythonCommand ?? 'uv',
+      args: ['run', '--frozen', 'dsh-data-sources-mcp'], cwd, env: pythonEnvironment(bootstrap),
+      failOnStartupError: true, reconnect: { enabled: false },
+    }))
+    yield async () => { await child.dispose(); await broker.dispose() }
+  }, 'data-sources.python-mcp')
+  await child.await()
 }
