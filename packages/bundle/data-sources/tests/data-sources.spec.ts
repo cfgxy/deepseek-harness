@@ -67,13 +67,21 @@ function connector(kind: SourceKind): ReadConnector {
   }
 }
 
-function brokerRequest(path: string, frame: unknown): Promise<string> {
+function brokerRequest(endpoint: { transport: 'unix'; path: string } | { transport: 'tcp'; host: string; port: number }, frame: unknown): Promise<string> {
   return new Promise((resolve, reject) => {
-    const socket = createConnection(path)
+    const socket = endpoint.transport === 'unix' ? createConnection(endpoint.path) : createConnection(endpoint.port, endpoint.host)
     let response = ''
     socket.setEncoding('utf8'); socket.on('data', (value) => { response += value })
     socket.once('error', reject); socket.once('close', () => resolve(response))
     socket.once('connect', () => socket.end(`${JSON.stringify(frame)}\n`))
+  })
+}
+
+function dribble(endpoint: { transport: 'unix'; path: string } | { transport: 'tcp'; host: string; port: number }): Promise<void> {
+  return new Promise((resolve) => {
+    const socket = endpoint.transport === 'unix' ? createConnection(endpoint.path) : createConnection(endpoint.port, endpoint.host)
+    socket.once('error', () => resolve()); socket.once('close', () => resolve())
+    socket.once('connect', () => { socket.write('{'); setTimeout(() => socket.write('"'), 20) })
   })
 }
 
@@ -225,17 +233,29 @@ describe('read-only data source supervisor', () => {
     expect(execute).not.toHaveBeenCalled()
   })
 
-  it('requires a capability and bounded single-frame exchange on the private broker', async () => {
-    const broker = new DataSourcesBroker(async request => ({ operation: request.operation }))
+  it.each(['unix', 'tcp'] as const)('enforces bounded authenticated broker frames over %s', async (transport) => {
+    let aborted = false
+    const broker = new DataSourcesBroker(async (request, signal) => {
+      if (request.operation === 'large') return { value: 'x'.repeat(65 * 1024) }
+      if (request.operation === 'reject') throw new Error('private detail')
+      if (request.operation === 'slow') return await new Promise((_resolve, reject) => signal.addEventListener('abort', () => { aborted = true; reject(new Error('aborted')) }, { once: true }))
+      return { operation: request.operation }
+    }, { transport, deadlineMs: 40 })
     const bootstrap = await broker.start()
     try {
-      if (bootstrap.endpoint.transport !== 'unix') return
-      await expect(brokerRequest(bootstrap.endpoint.path, { capability: 'wrong', operation: 'source_list', arguments: {} }))
+      await expect(brokerRequest(bootstrap.endpoint, { capability: 'wrong', operation: 'source_list', arguments: {} }))
         .resolves.toBe('{"ok":false}\n')
-      await expect(brokerRequest(bootstrap.endpoint.path, { capability: bootstrap.capability, operation: 'source_list', arguments: {} }))
+      await expect(brokerRequest(bootstrap.endpoint, { capability: bootstrap.capability, operation: 'source_list', arguments: {} }))
         .resolves.toBe('{"ok":true,"result":{"operation":"source_list"}}\n')
-      await expect(brokerRequest(bootstrap.endpoint.path, { capability: bootstrap.capability, operation: 'x', arguments: { oversized: 'x'.repeat(65 * 1024) } }))
-        .rejects.toThrow()
+      await expect(brokerRequest(bootstrap.endpoint, { capability: bootstrap.capability, operation: 'large', arguments: {} }))
+        .resolves.toBe('{"ok":false}\n')
+      await expect(brokerRequest(bootstrap.endpoint, { capability: bootstrap.capability, operation: 'reject', arguments: {} }))
+        .resolves.toBe('{"ok":false}\n')
+      await expect(brokerRequest(bootstrap.endpoint, { capability: bootstrap.capability, operation: 'x', arguments: { oversized: 'x'.repeat(65 * 1024) } }))
+        .resolves.toBe('')
+      await expect(dribble(bootstrap.endpoint)).resolves.toBeUndefined()
+      await expect(brokerRequest(bootstrap.endpoint, { capability: bootstrap.capability, operation: 'slow', arguments: {} })).resolves.toBe('')
+      expect(aborted).toBe(true)
     } finally { await broker.dispose() }
   })
 
