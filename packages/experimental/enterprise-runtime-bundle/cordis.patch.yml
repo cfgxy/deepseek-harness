@@ -1,0 +1,5 @@
+- insert:
+    - id: enterprise-runtime
+      name: '@deepseek-ai/dsh-experimental-enterprise-runtime'
+      config:
+        storageDir: .enterprise-runtime

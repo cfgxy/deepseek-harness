@@ -1,0 +1,13 @@
+{
+  "name": "@deepseek-ai/dsh-experimental-enterprise-runtime-bundle",
+  "description": "Experimental bundle for the declarative enterprise ZIP runtime",
+  "version": "0.2.2-alpha.2",
+  "publishConfig": { "access": "public" },
+  "repository": { "type": "git", "url": "git+https://github.com/cfgxy/deepseek-harness.git", "directory": "packages/experimental/enterprise-runtime-bundle" },
+  "type": "module", "main": "lib/index.js", "types": "lib/types/index.d.ts",
+  "exports": { ".": { "types": "./lib/types/index.d.ts", "default": "./lib/index.js" }, "./cordis.patch.yml": "./cordis.patch.yml", "./package.json": "./package.json" },
+  "files": ["lib/index.js", "lib/types/**/*.d.ts", "cordis.patch.yml"], "license": "MIT",
+  "dependencies": { "@deepseek-ai/dsh-experimental-enterprise-runtime": "workspace:*" },
+  "peerDependencies": { "@deepseek-ai/cordis": "workspace:~" }, "devDependencies": { "@deepseek-ai/cordis": "workspace:~" },
+  "dsh": { "bundle": { "patch": "./cordis.patch.yml" } }
+}
