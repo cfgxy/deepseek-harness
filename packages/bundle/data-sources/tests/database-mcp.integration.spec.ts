@@ -92,6 +92,11 @@ async function call(ctx: Context, id: string, name: string, arguments_: Record<s
   }))
 }
 
+function errorText(result: Awaited<ReturnType<typeof executeToolFixture>>): string {
+  const value = result.value as { content?: Array<{ type: string; text?: string }> } | undefined
+  return value?.content?.find(block => block.type === 'text')?.text ?? JSON.stringify(result)
+}
+
 function alias(sources: readonly { id: string; queryAlias?: string }[], id: string): string {
   const value = sources.find(source => source.id === id)?.queryAlias
   if (value === undefined) throw new Error('database source alias is unavailable')
@@ -122,6 +127,10 @@ describe.skipIf(!dockerAvailable)('managed database MCP fixtures', () => {
       expect(postgresObject?.object_id).toMatch(/^[A-Za-z0-9_-]+$/)
       const described = await call(ctx, 'describe', `${prefix}data_describe`, { source_id: mysqlId, object_id: mysqlObject?.object_id }) as { columns: string[] }
       expect(described.columns).toEqual(expect.arrayContaining(['column_name', 'data_type', 'ordinal_position']))
+      const single = await call(ctx, 'single', `${prefix}data_query`, { source_ids: [postgresId], sql: `SELECT ${postgresAlias}.public.sales.join_key FROM ${postgresAlias}.public.sales` }) as { columns: string[]; rows: unknown[]; truncated: boolean }
+      expect(single.columns).toEqual(['join_key'])
+      expect(single.rows).toHaveLength(2)
+      expect(single.truncated).toBe(false)
       const query = `SELECT ${mysqlAlias}.fixture.orders.join_key FROM ${mysqlAlias}.fixture.orders JOIN ${postgresAlias}.public.sales ON ${mysqlAlias}.fixture.orders.join_key = ${postgresAlias}.public.sales.join_key`
       const joined = await call(ctx, 'join', `${prefix}data_query`, { source_ids: [mysqlId, postgresId], sql: query }) as { rows: unknown[]; truncated: boolean }
       expect(joined.rows).toHaveLength(2)
@@ -142,8 +151,10 @@ describe.skipIf(!dockerAvailable)('managed database MCP fixtures', () => {
       expect(dangerous.isError).toBe(true)
       const tls = await executeToolFixture(ctx, { signal: AbortSignal.timeout(30_000), callId: ToolCallId('tls'), name: `${prefix}data_list`, arguments: { source_id: 'tls-source' } })
       expect(tls.isError).toBe(true)
+      expect(errorText(tls)).toContain('data-sources database is unavailable')
       const sentinel = await executeToolFixture(ctx, { signal: AbortSignal.timeout(30_000), callId: ToolCallId('sentinel'), name: `${prefix}data_list`, arguments: { source_id: 'sentinel-source' } })
       expect(sentinel.isError).toBe(true)
+      expect(errorText(sentinel)).toContain('data-sources database is unavailable')
       expect(JSON.stringify(sentinel)).not.toContain(descriptorSentinel)
     } finally {
       await plugin?.dispose()
