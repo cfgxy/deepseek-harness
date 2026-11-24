@@ -197,6 +197,38 @@ describe('read-only data source supervisor', () => {
     }
   }, 30_000)
 
+  it('admits Host-owned local file tokens through the managed Python MCP', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'dsh-data-sources-file-mcp-'))
+    const ctx = new Context()
+    ctx.provide('credentials', { resolve: async () => undefined } as never)
+    await ctx.plugin(SystemPrompt); await ctx.plugin(ToolRuntime); await ctx.plugin(NativeToolExecutor)
+    let dataSources: ReturnType<typeof ctx.plugin> | undefined
+    try {
+      await writeFile(join(root, 'report.txt'), 'fixture-content')
+      const configured: SourceConfig = { ...source('local-directory'), policy: { maxBytes: 1024, maxRows: 10, allowedPath: root } }
+      dataSources = ctx.plugin(DataSources, { sources: [configured] })
+      await dataSources
+      const prefix = 'mcp__data-sources-python__'
+      const search = await executeToolFixture(ctx, { signal: AbortSignal.timeout(10_000), callId: ToolCallId('file-search'), name: `${prefix}file_search`, arguments: { source_id: configured.id, query: 'report' } })
+      expect(search.isError).toBe(false)
+      const searchValue = search.value as { content: { type: string; text?: string }[] }
+      const found = JSON.parse(searchValue.content.find(block => block.type === 'text')!.text!) as { objects: { object_id: string }[] }
+      expect(found.objects).toHaveLength(1)
+      expect(JSON.stringify(search)).not.toContain(root)
+      const read = await executeToolFixture(ctx, { signal: AbortSignal.timeout(10_000), callId: ToolCallId('file-read'), name: `${prefix}data_read`, arguments: { source_id: configured.id, object_id: found.objects[0]!.object_id } })
+      expect(read.isError).toBe(false)
+      expect(JSON.stringify(read)).toContain('fixture-content')
+      expect(JSON.stringify(read)).not.toContain(root)
+      const rawPath = await executeToolFixture(ctx, { signal: AbortSignal.timeout(10_000), callId: ToolCallId('raw-path'), name: `${prefix}data_read`, arguments: { source_id: configured.id, object_id: join(root, 'report.txt') } })
+      expect(rawPath.isError).toBe(true)
+      expect(JSON.stringify(rawPath)).not.toContain(root)
+    } finally {
+      await dataSources?.dispose()
+      await ctx.fiber.dispose()
+      await rm(root, { recursive: true, force: true })
+    }
+  }, 30_000)
+
   it('rolls back the broker and tool generation when the Python child cannot start', async () => {
     const ctx = new Context()
     ctx.provide('credentials', { resolve: async () => undefined } as never)
@@ -390,6 +422,43 @@ describe('read-only data source supervisor', () => {
       process.env.PATH = originalPath
       await rm(root, { recursive: true, force: true })
     }
+  })
+
+  it('admits file reads only through opaque Host-minted catalog tokens', async () => {
+    const local: SourceConfig = {
+      ...source('local-directory'),
+      policy: { maxBytes: 1024, maxRows: 10, allowedPath: '/fixtures' },
+    }
+    const execute = vi.fn(async ({ request }: ConnectorRequest) => {
+      if (request.operation === 'directory.list') return { data: [{ name: 'report.txt', kind: 'file' }], truncated: false }
+      expect(request.input).toEqual({ path: '/fixtures/report.txt' })
+      return { data: { path: '/fixtures/report.txt', bytes: 2, content: 'ok' }, truncated: false }
+    })
+    const supervisor = new ConnectorSupervisor([local], [{ kind: 'local-directory', probe: async () => {}, execute }], { resolve: async () => undefined })
+    const listed = await supervisor.listFiles(local.id, 'report')
+    expect(listed.objects).toHaveLength(1)
+    expect(JSON.stringify(listed)).not.toContain('/fixtures')
+    const read = await supervisor.readFile(local.id, listed.objects[0]!.object_id)
+    expect(read).toMatchObject({ data: { bytes: 2, content: 'ok' }, truncated: false })
+    expect(JSON.stringify(read)).not.toContain('/fixtures')
+    await expect(supervisor.readFile(local.id, 'forged-token')).rejects.toThrow('not admitted')
+    expect(execute).toHaveBeenCalledTimes(2)
+  })
+
+  it.each([
+    { kind: 's3' as const, source: { ...source('s3'), policy: { maxBytes: 1024, maxRows: 10, allowedPrefix: 'reports/' } }, catalog: { keys: ['reports/report.txt'] }, expected: 'reports/report.txt' },
+    { kind: 'sftp' as const, source: { ...source('sftp'), policy: { maxBytes: 1024, maxRows: 10, allowedPath: '/upload' } }, catalog: { entries: ['report.txt'] }, expected: '/upload/report.txt' },
+  ])('normalizes listed $kind objects before a token can read them', async ({ kind, source: configured, catalog, expected }) => {
+    const execute = vi.fn(async ({ request }: ConnectorRequest) => {
+      if (request.operation === 'catalog' || request.operation === 'directory.list') return { data: catalog, truncated: false }
+      expect(request.input).toEqual({ path: expected })
+      return { data: { path: expected, bytes: 2, content: 'ok' }, truncated: false }
+    })
+    const supervisor = new ConnectorSupervisor([configured], [{ kind, probe: async () => {}, execute }], { resolve: async () => ({ value: 'fixture' }) })
+    const listed = await supervisor.listFiles(configured.id)
+    expect(listed.objects).toHaveLength(1)
+    await expect(supervisor.readFile(configured.id, listed.objects[0]!.object_id)).resolves.toMatchObject({ data: { content: 'ok' } })
+    expect(JSON.stringify(listed)).not.toContain(expected)
   })
 
   it('rejects an oversized PostgreSQL frame before its body is materialized', async () => {

@@ -1,5 +1,6 @@
 import { credentialRef } from '@deepseek-ai/dsh-credentials'
-import { createHash, randomUUID } from 'node:crypto'
+import { createHash, randomBytes, randomUUID } from 'node:crypto'
+import { basename, posix, resolve } from 'node:path'
 import { guardRead } from './policy.ts'
 import { assertSourceConfig, type ReadRequest, type ReadResult, type SourceConfig, type SourceKind, type SourcePolicy } from './types.ts'
 
@@ -38,9 +39,46 @@ function queryAlias(sourceId: string): string {
   return `src_${createHash('sha256').update(sourceId).digest('hex').slice(0, 16)}`
 }
 
+interface FileObject { sourceId: string; revision: string; path: string; name: string; issuedAt: number }
+const FILE_OBJECT_TTL_MS = 5 * 60_000
+const FILE_OBJECT_CAPACITY = 4096
+
+function isChildName(value: string): boolean { return value === basename(value) && value !== '.' && value !== '..' && !value.includes('\0') }
+
+function fileCandidates(source: SourceConfig, data: unknown): { name: string; path: string }[] {
+  if (source.kind === 'local-directory' && Array.isArray(data)) {
+    const root = source.policy.allowedPath
+    if (root === undefined) return []
+    return data.flatMap((item) => {
+      if (typeof item !== 'object' || item === null) return []
+      const value = item as { name?: unknown; kind?: unknown }
+      if (typeof value.name !== 'string' || value.kind !== 'file' || !isChildName(value.name)) return []
+      return [{ name: value.name, path: resolve(root, value.name) }]
+    })
+  }
+  if (source.kind === 'sftp' && typeof data === 'object' && data !== null && Array.isArray((data as { entries?: unknown }).entries)) {
+    const root = source.policy.allowedPath
+    if (root === undefined) return []
+    return (data as { entries: unknown[] }).entries.flatMap((value) => {
+      if (typeof value !== 'string' || !isChildName(value)) return []
+      return [{ name: value, path: posix.join(root, value) }]
+    })
+  }
+  if (source.kind === 's3' && typeof data === 'object' && data !== null && Array.isArray((data as { keys?: unknown }).keys)) {
+    const prefix = source.policy.allowedPrefix
+    if (prefix === undefined) return []
+    return (data as { keys: unknown[] }).keys.flatMap((value) => {
+      if (typeof value !== 'string' || !value.startsWith(prefix)) return []
+      return [{ name: value.slice(prefix.length), path: value }]
+    })
+  }
+  return []
+}
+
 export class ConnectorSupervisor {
   readonly #sources = new Map<string, SourceConfig>()
   readonly #connectors = new Map<SourceKind, ReadConnector>()
+  readonly #fileObjects = new Map<string, FileObject>()
 
   constructor(sources: readonly SourceConfig[], connectors: readonly ReadConnector[], private readonly credentials: CredentialResolver) {
     for (const source of sources) {
@@ -72,6 +110,80 @@ export class ConnectorSupervisor {
       ...source.kind === 'mysql' || source.kind === 'postgresql' ? { queryAlias: queryAlias(source.id) } : {},
       policy: { maxBytes: source.policy.maxBytes, maxRows: source.policy.maxRows },
     }
+  }
+
+  async listFiles(
+    sourceId: string, query?: string,
+  ): Promise<{ objects: { object_id: string; name: string }[]; truncated: boolean }> {
+    const source = this.#source(sourceId)
+    if (source.kind !== 'local-directory' && source.kind !== 's3' && source.kind !== 'sftp') {
+      throw new Error('data-sources: file source is not admitted')
+    }
+    if (query !== undefined && (typeof query !== 'string' || query.trim() === '' || query.length > 128)) {
+      throw new Error('data-sources: file search is invalid')
+    }
+    const request: ReadRequest = source.kind === 's3'
+      ? { apiVersion: 'v1', sourceId, operation: 'catalog', input: {} }
+      : { apiVersion: 'v1', sourceId, operation: 'directory.list', input: { path: source.policy.allowedPath } }
+    const catalog = await this.execute(request)
+    const term = query?.toLocaleLowerCase()
+    const objects: { object_id: string; name: string }[] = []
+    let bytes = 2; let truncated = catalog.truncated
+    for (const candidate of fileCandidates(source, catalog.data)) {
+      if (term !== undefined && !candidate.name.toLocaleLowerCase().includes(term)) continue
+      const objectId = this.#mintFileObject(source, candidate)
+      const item = { object_id: objectId, name: candidate.name }
+      const size = Buffer.byteLength(JSON.stringify(item)) + (objects.length ? 1 : 0)
+      if (objects.length >= source.policy.maxRows || bytes + size > source.policy.maxBytes) {
+        this.#fileObjects.delete(objectId); truncated = true; break
+      }
+      objects.push(item); bytes += size
+    }
+    return { objects, truncated }
+  }
+
+  async readFile(
+    sourceId: string, objectId: string, maxBytes?: number,
+  ): Promise<{ source: { id: string; revision: string }; data: { bytes: number; content: string }; truncated: boolean }> {
+    const source = this.#source(sourceId)
+    const object = this.#resolveFileObject(source, objectId)
+    const result = await this.execute({
+      apiVersion: 'v1', sourceId, operation: 'object.read', input: { path: object.path },
+      ...(maxBytes === undefined ? {} : { maxBytes }),
+    })
+    const data = result.data as { bytes?: unknown; content?: unknown }
+    if (typeof data?.bytes !== 'number' || typeof data.content !== 'string') throw new Error('data-sources: file read is unavailable')
+    return { source: result.source, data: { bytes: data.bytes, content: data.content }, truncated: result.truncated }
+  }
+
+  #mintFileObject(source: SourceConfig, candidate: { name: string; path: string }): string {
+    this.#purgeFileObjects()
+    if (this.#fileObjects.size >= FILE_OBJECT_CAPACITY) {
+      const oldest = [...this.#fileObjects.entries()].reduce(
+        (left, right) => left[1].issuedAt < right[1].issuedAt ? left : right,
+      )[0]
+      this.#fileObjects.delete(oldest)
+    }
+    const token = randomBytes(24).toString('base64url')
+    this.#fileObjects.set(token, {
+      sourceId: source.id, revision: source.revision, path: candidate.path,
+      name: candidate.name, issuedAt: Date.now(),
+    })
+    return token
+  }
+
+  #resolveFileObject(source: SourceConfig, token: string): FileObject {
+    this.#purgeFileObjects()
+    const object = this.#fileObjects.get(token)
+    if (object === undefined || object.sourceId !== source.id || object.revision !== source.revision) {
+      throw new Error('data-sources: file object is not admitted')
+    }
+    return object
+  }
+
+  #purgeFileObjects(): void {
+    const cutoff = Date.now() - FILE_OBJECT_TTL_MS
+    for (const [token, object] of this.#fileObjects) if (object.issuedAt < cutoff) this.#fileObjects.delete(token)
   }
 
   async acquireDatabaseScope(

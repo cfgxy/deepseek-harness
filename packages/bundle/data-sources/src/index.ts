@@ -84,6 +84,17 @@ async function admitBrokerOperation(supervisor: ConnectorSupervisor, request: Br
   if (typeof sourceId !== 'string') throw new Error('data-sources: broker source_id is required')
   if (request.operation === 'source_info') return supervisor.inspect(sourceId)
   if (request.operation === 'source_probe') return await supervisor.probe(sourceId)
+  if (request.operation === 'file.list') return await supervisor.listFiles(sourceId)
+  if (request.operation === 'file.search') {
+    const query = request.arguments.query
+    if (typeof query !== 'string') throw new Error('data-sources: file search query is required')
+    return await supervisor.listFiles(sourceId, query)
+  }
+  if (request.operation === 'file.read') {
+    const objectId = request.arguments.object_id
+    if (typeof objectId !== 'string') throw new Error('data-sources: file object id is required')
+    return await supervisor.readFile(sourceId, objectId, positiveInteger(request.arguments.max_bytes))
+  }
   // The remaining vocabulary is deliberately deny-by-default until its object-ID,
   // query-scope and DuckDB attachment admission is implemented in the Host.
   throw new Error('data-sources: broker operation is not admitted')

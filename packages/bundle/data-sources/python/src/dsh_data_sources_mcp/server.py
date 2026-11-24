@@ -239,13 +239,18 @@ async def data_query(source_ids: list[str], sql: str, max_rows: int | None = Non
 
 
 @mcp.tool()
-async def data_read(source_id: str, object_id: str, max_bytes: int | None = None) -> Any:
-    return await broker("data_read", source_id=source_id, object_id=object_id, max_bytes=max_bytes)
+async def file_list(source_id: str) -> Any:
+    return await broker("file.list", source_id=source_id)
 
 
 @mcp.tool()
-async def file_search(source_id: str, query: str, max_rows: int | None = None) -> Any:
-    return await broker("file_search", source_id=source_id, query=query, max_rows=max_rows)
+async def data_read(source_id: str, object_id: str, max_bytes: int | None = None) -> Any:
+    return await broker("file.read", source_id=source_id, object_id=object_id, max_bytes=max_bytes)
+
+
+@mcp.tool()
+async def file_search(source_id: str, query: str) -> Any:
+    return await broker("file.search", source_id=source_id, query=query)
 
 
 def main() -> None:
