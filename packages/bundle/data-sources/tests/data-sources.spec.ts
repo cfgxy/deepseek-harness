@@ -4,12 +4,13 @@ import { promisify } from 'node:util'
 import tls from 'node:tls'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { createServer } from 'node:net'
+import { createConnection, createServer } from 'node:net'
 import { createServer as createHttpServer } from 'node:http'
 import https from 'node:https'
 import { describe, expect, it, vi } from 'vitest'
 import { Context } from '@deepseek-ai/cordis'
 import { Config as BundleConfig, DataSourcesRemote } from '../src/index.ts'
+import { DataSourcesBroker } from '../src/broker.ts'
 import { LocalDirectoryConnector } from '../src/local-directory.ts'
 import { MysqlConnector } from '../src/mysql.ts'
 import { S3Connector } from '../src/s3.ts'
@@ -64,6 +65,16 @@ function connector(kind: SourceKind): ReadConnector {
       }
     },
   }
+}
+
+function brokerRequest(path: string, frame: unknown): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const socket = createConnection(path)
+    let response = ''
+    socket.setEncoding('utf8'); socket.on('data', (value) => { response += value })
+    socket.once('error', reject); socket.once('close', () => resolve(response))
+    socket.once('connect', () => socket.end(`${JSON.stringify(frame)}\n`))
+  })
 }
 
 function mysqlPacket(payload: Buffer, sequence: number): Buffer {
@@ -212,6 +223,20 @@ describe('read-only data source supervisor', () => {
       apiVersion: 'v1', sourceId: 'mysql', operation: 'sql.query', input: { sql: `SELECT 1 ${clause} '/tmp/fixture'` },
     })).rejects.toThrow('only one SELECT')
     expect(execute).not.toHaveBeenCalled()
+  })
+
+  it('requires a capability and bounded single-frame exchange on the private broker', async () => {
+    const broker = new DataSourcesBroker(async request => ({ operation: request.operation }))
+    const bootstrap = await broker.start()
+    try {
+      if (bootstrap.endpoint.transport !== 'unix') return
+      await expect(brokerRequest(bootstrap.endpoint.path, { capability: 'wrong', operation: 'source_list', arguments: {} }))
+        .resolves.toBe('{"ok":false}\n')
+      await expect(brokerRequest(bootstrap.endpoint.path, { capability: bootstrap.capability, operation: 'source_list', arguments: {} }))
+        .resolves.toBe('{"ok":true,"result":{"operation":"source_list"}}\n')
+      await expect(brokerRequest(bootstrap.endpoint.path, { capability: bootstrap.capability, operation: 'x', arguments: { oversized: 'x'.repeat(65 * 1024) } }))
+        .rejects.toThrow()
+    } finally { await broker.dispose() }
   })
 
   it('bounds real local reads and rejects a symlink which escapes the configured root', async () => {

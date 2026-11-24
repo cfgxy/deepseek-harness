@@ -8,6 +8,7 @@
   "files": [
     "src/index.ts",
     "src/api.ts",
+    "src/broker.ts",
     "src/local-directory.ts",
     "src/mysql.ts",
     "src/policy.ts",

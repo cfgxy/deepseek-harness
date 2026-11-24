@@ -12,26 +12,43 @@ from mcp.server.fastmcp import FastMCP
 mcp = FastMCP("dsh-data-sources")
 
 
+MAX_FRAME_BYTES = 64 * 1024
+BROKER_TIMEOUT_SECONDS = 10
+
+
 async def broker(operation: str, **arguments: Any) -> Any:
     """Forward one short-lived admitted operation to the Host-private Unix broker.
 
-    The socket path is a local rendezvous point, not a credential. The Host
-    validates every operation and resolves credentials only after admission.
+    The Host validates every operation and resolves credentials only after
+    admission. On Windows it selects an authenticated loopback endpoint;
+    elsewhere it supplies a mode-0600 Unix socket.
     """
     path = os.environ.get("DSH_DATA_SOURCES_BROKER")
-    if not path:
+    capability = os.environ.get("DSH_DATA_SOURCES_BROKER_CAPABILITY")
+    if not path or not capability:
         raise RuntimeError("data-sources broker is unavailable")
-    reader, writer = await asyncio.open_unix_connection(path)
     try:
-        writer.write((json.dumps({"operation": operation, "arguments": arguments}) + "\n").encode())
-        await writer.drain()
-        response = json.loads((await reader.readline()).decode())
+        if path.startswith("tcp://"):
+            host, port = path.removeprefix("tcp://").rsplit(":", 1)
+            reader, writer = await asyncio.wait_for(asyncio.open_connection(host, int(port)), BROKER_TIMEOUT_SECONDS)
+        else:
+            reader, writer = await asyncio.wait_for(asyncio.open_unix_connection(path), BROKER_TIMEOUT_SECONDS)
+        frame = json.dumps({"capability": capability, "operation": operation, "arguments": arguments}).encode()
+        if len(frame) > MAX_FRAME_BYTES:
+            raise RuntimeError("data-sources broker request exceeds the frame limit")
+        writer.write(frame + b"\n")
+        await asyncio.wait_for(writer.drain(), BROKER_TIMEOUT_SECONDS)
+        line = await asyncio.wait_for(reader.readline(), BROKER_TIMEOUT_SECONDS)
+        if not line or len(line) > MAX_FRAME_BYTES:
+            raise RuntimeError("data-sources broker response is invalid")
+        response = json.loads(line)
         if response.get("ok") is not True:
             raise RuntimeError("data-sources broker rejected the operation")
         return response["result"]
     finally:
-        writer.close()
-        await writer.wait_closed()
+        if "writer" in locals():
+            writer.close()
+            await writer.wait_closed()
 
 
 @mcp.tool()
