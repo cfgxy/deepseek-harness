@@ -22,7 +22,7 @@
     "./package.json": "./package.json",
     "./locale/*.json": "./locale/*.json"
   },
-  "files": ["locale/*.json", "lib/index.js", "lib/client.js", "lib/types/**/*.js", "lib/types/**/*.d.ts", "lib/typert.host.js", "lib/typert.host.d.ts", "lib/typert.remote-client.js", "lib/typert.remote-client.d.ts", "cordis.patch.yml"],
+  "files": ["locale/*.json", "python/**", "lib/index.js", "lib/client.js", "lib/types/**/*.js", "lib/types/**/*.d.ts", "lib/typert.host.js", "lib/typert.host.d.ts", "lib/typert.remote-client.js", "lib/typert.remote-client.d.ts", "cordis.patch.yml"],
   "license": "MIT",
   "engines": { "dsh": ">=0.2.2-alpha.2 <0.3.0" },
   "dependencies": {
