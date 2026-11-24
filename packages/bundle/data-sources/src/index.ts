@@ -68,6 +68,15 @@ function pythonEnvironment(bootstrap: BrokerBootstrap): Record<string, string> {
 }
 
 async function admitBrokerOperation(supervisor: ConnectorSupervisor, request: BrokerRequest): Promise<unknown> {
+  if (request.operation === 'database.acquire') {
+    const sourceIds = request.arguments.source_ids
+    if (!Array.isArray(sourceIds) || !sourceIds.every(id => typeof id === 'string')) {
+      throw new Error('data-sources: database scope is required')
+    }
+    return supervisor.acquireDatabaseScope(
+      sourceIds, positiveInteger(request.arguments.max_rows), positiveInteger(request.arguments.max_bytes),
+    )
+  }
   const sourceId = request.arguments.source_id
   if (request.operation === 'source_list') return supervisor.list()
   if (typeof sourceId !== 'string') throw new Error('data-sources: broker source_id is required')
@@ -76,6 +85,11 @@ async function admitBrokerOperation(supervisor: ConnectorSupervisor, request: Br
   // The remaining vocabulary is deliberately deny-by-default until its object-ID,
   // query-scope and DuckDB attachment admission is implemented in the Host.
   throw new Error('data-sources: broker operation is not admitted')
+}
+function positiveInteger(value: unknown): number | undefined {
+  if (value === undefined || value === null) return undefined
+  if (typeof value !== 'number' || !Number.isSafeInteger(value) || value < 1) throw new Error('data-sources: budget is invalid')
+  return value
 }
 
 

@@ -19,6 +19,18 @@ export interface CredentialResolver {
   resolve(ref: ReturnType<typeof credentialRef>): Promise<{ value: string } | undefined>
 }
 
+/** Private broker-only material. Never return this from a public MCP handler. */
+export interface PrivateAttachmentDescriptor {
+  id: string
+  kind: Extract<SourceKind, 'mysql' | 'postgresql'>
+  host: string
+  port: number
+  database: string
+  credential: string
+  maxRows: number
+  maxBytes: number
+}
+
 /** Owns configured sources, read-only policy admission, and per-operation credential resolution. */
 export class ConnectorSupervisor {
   readonly #sources = new Map<string, SourceConfig>()
@@ -50,6 +62,26 @@ export class ConnectorSupervisor {
       enabled: source.enabled,
       policy: { maxBytes: source.policy.maxBytes, maxRows: source.policy.maxRows },
     }
+  }
+
+  async acquireDatabaseScope(
+    sourceIds: readonly string[], maxRows?: number, maxBytes?: number,
+  ): Promise<readonly PrivateAttachmentDescriptor[]> {
+    if (sourceIds.length === 0 || sourceIds.length > 8 || new Set(sourceIds).size !== sourceIds.length) {
+      throw new Error('data-sources: invalid database scope')
+    }
+    return Promise.all(sourceIds.map(async (id) => {
+      const source = this.#source(id)
+      const connection = source.connection
+      if (!source.enabled || (source.kind !== 'mysql' && source.kind !== 'postgresql') || connection?.host === undefined || connection.database === undefined) {
+        throw new Error('data-sources: database source is not admitted')
+      }
+      if (maxRows !== undefined && maxRows > source.policy.maxRows) throw new Error('data-sources: requested row limit exceeds source policy')
+      if (maxBytes !== undefined && maxBytes > source.policy.maxBytes) throw new Error('data-sources: requested byte limit exceeds source policy')
+      const resolved = await this.#credential(source)
+      if (resolved === undefined) throw new Error('data-sources: database source is unavailable')
+      return { id: source.id, kind: source.kind, host: connection.host, port: connection.port ?? (source.kind === 'mysql' ? 3306 : 5432), database: connection.database, credential: resolved, maxRows: maxRows ?? source.policy.maxRows, maxBytes: maxBytes ?? source.policy.maxBytes }
+    }))
   }
 
   async probe(sourceId: string): Promise<{ source: { id: string; revision: string }; connector: SourceKind; observedAt: string }> {
