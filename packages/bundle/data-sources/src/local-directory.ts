@@ -47,7 +47,9 @@ export class LocalDirectoryConnector implements ReadConnector {
       const data: { name: string; kind: 'directory' | 'file' | 'other' }[] = []
       let bytes = 0; let truncated = false
       try {
-        for await (const entry of directory) {
+        while (true) {
+          const entry = await directory.read()
+          if (entry === null) break
           if (data.length === maxRows) { truncated = true; break }
           const item = { name: entry.name, kind: entryKind(entry) }
           const itemBytes = Buffer.byteLength(JSON.stringify(item))

@@ -219,6 +219,8 @@ describe('read-only data source supervisor', () => {
     const outside = await mkdtemp(join(tmpdir(), 'dsh-data-sources-outside-'))
     try {
       await writeFile(join(root, 'report.txt'), 'abcdef')
+      await writeFile(join(root, 'entry-a'), 'a')
+      await writeFile(join(root, 'entry-b'), 'b')
       await mkdir(join(root, 'nested'))
       await writeFile(join(outside, 'secret.txt'), 'secret')
       await symlink(outside, join(root, 'escape'))
@@ -228,6 +230,9 @@ describe('read-only data source supervisor', () => {
       }
       const supervisor = new ConnectorSupervisor([local], [new LocalDirectoryConnector()], { resolve: async () => undefined })
 
+      await expect(supervisor.execute({
+        apiVersion: 'v1', sourceId: local.id, operation: 'directory.list', input: { path: root }, maxRows: 1,
+      })).resolves.toMatchObject({ data: [], truncated: true })
       await expect(supervisor.execute({
         apiVersion: 'v1', sourceId: local.id, operation: 'object.read', input: { path: join(root, 'report.txt') },
       })).resolves.toMatchObject({ data: { content: 'abc', bytes: 3 }, truncated: true })
