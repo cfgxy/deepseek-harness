@@ -22,6 +22,7 @@ export interface CredentialResolver {
 /** Private broker-only material. Never return this from a public MCP handler. */
 export interface PrivateAttachmentDescriptor {
   id: string
+  revision: string
   queryAlias: string
   kind: Extract<SourceKind, 'mysql' | 'postgresql'>
   host: string
@@ -92,7 +93,7 @@ export class ConnectorSupervisor {
       if (maxBytes !== undefined && maxBytes > source.policy.maxBytes) throw new Error('data-sources: requested byte limit exceeds source policy')
       const resolved = await this.#credential(source)
       if (resolved === undefined) throw new Error('data-sources: database source is unavailable')
-      return { id: source.id, queryAlias: queryAlias(source.id), kind: source.kind, host: connection.host, port: connection.port ?? (source.kind === 'mysql' ? 3306 : 5432), database: connection.database, credential: resolved, maxRows: maxRows ?? source.policy.maxRows, maxBytes: maxBytes ?? source.policy.maxBytes }
+      return { id: source.id, revision: source.revision, queryAlias: queryAlias(source.id), kind: source.kind, host: connection.host, port: connection.port ?? (source.kind === 'mysql' ? 3306 : 5432), database: connection.database, credential: resolved, maxRows: maxRows ?? source.policy.maxRows, maxBytes: maxBytes ?? source.policy.maxBytes }
     }))
   }
 

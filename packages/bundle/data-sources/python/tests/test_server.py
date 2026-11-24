@@ -11,7 +11,24 @@ from mcp import ClientSession, StdioServerParameters
 from mcp.client.stdio import stdio_client
 
 
-from dsh_data_sources_mcp.server import _statement
+from dsh_data_sources_mcp.server import ObjectRegistry, _statement
+
+
+class ObjectRegistryTests(unittest.TestCase):
+    def test_requires_an_enumerated_current_object_for_describe_and_query(self) -> None:
+        clock = [1000.0]
+        registry = ObjectRegistry(now=lambda: clock[0])
+        token = registry.issue(source_id="sales-db", revision="1", query_alias="src_sales", schema="public", table="orders", kind="BASE TABLE")
+        record = registry.resolve(token, source_id="sales-db", revision="1", query_alias="src_sales")
+        self.assertEqual(record.table, "orders")
+        registry.require_relations([("src_sales", "public", "orders")], {"src_sales": ("sales-db", "1")})
+        with self.assertRaisesRegex(RuntimeError, "not admitted"):
+            registry.require_relations([("src_sales", "public", "payments")], {"src_sales": ("sales-db", "1")})
+        with self.assertRaisesRegex(RuntimeError, "not admitted"):
+            registry.resolve(token, source_id="other-db", revision="1", query_alias="src_sales")
+        clock[0] += 301
+        with self.assertRaisesRegex(RuntimeError, "not admitted"):
+            registry.resolve(token, source_id="sales-db", revision="1", query_alias="src_sales")
 
 
 class QueryAdmissionTests(unittest.TestCase):
