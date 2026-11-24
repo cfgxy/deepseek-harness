@@ -69,6 +69,8 @@ function pythonEnvironment(bootstrap: BrokerBootstrap): Record<string, string> {
 
 async function admitBrokerOperation(supervisor: ConnectorSupervisor, request: BrokerRequest): Promise<unknown> {
   if (request.operation === 'database.acquire') {
+    const intent = request.arguments.intent
+    if (intent !== 'list' && intent !== 'describe' && intent !== 'query') throw new Error('data-sources: database intent is invalid')
     const sourceIds = request.arguments.source_ids
     if (!Array.isArray(sourceIds) || !sourceIds.every(id => typeof id === 'string')) {
       throw new Error('data-sources: database scope is required')

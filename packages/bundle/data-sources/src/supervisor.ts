@@ -76,6 +76,9 @@ export class ConnectorSupervisor {
       if (!source.enabled || (source.kind !== 'mysql' && source.kind !== 'postgresql') || connection?.host === undefined || connection.database === undefined) {
         throw new Error('data-sources: database source is not admitted')
       }
+      // DuckDB extension TLS settings have not yet been proven equivalent to
+      // the Host connector's CA/server-name contract: fail closed, never downgrade.
+      if (connection.tls?.enabled === true) throw new Error('data-sources: database TLS attachment is unavailable')
       if (maxRows !== undefined && maxRows > source.policy.maxRows) throw new Error('data-sources: requested row limit exceeds source policy')
       if (maxBytes !== undefined && maxBytes > source.policy.maxBytes) throw new Error('data-sources: requested byte limit exceeds source policy')
       const resolved = await this.#credential(source)

@@ -35,10 +35,15 @@ async def broker(operation: str, **arguments: Any) -> Any:
         if writer is not None:
             writer.close(); await writer.wait_closed()
 
-def _statement(sql: str) -> str:
+def _statement(sql: str, aliases: set[str]) -> str:
     sql = sql.strip()
-    forbidden = r"\b(attach|install|load|copy|pragma|insert|update|delete|merge|alter|drop|create|grant|revoke|call)\b"
-    if not re.match(r"^(select|with|explain|show)\b", sql, re.I) or ";" in sql or "--" in sql or "/*" in sql or re.search(forbidden, sql, re.I):
+    forbidden = r"\b(attach|install|load|copy|pragma|insert|update|delete|merge|alter|drop|create|grant|revoke|call|read_csv|read_parquet|read_json|glob)\b"
+    # Deliberately narrow grammar: no comments, table functions, or unqualified
+    # relations; every database reference must begin with an admitted alias.
+    if not re.match(r"^select\b", sql, re.I) or ";" in sql or "--" in sql or "/*" in sql or re.search(forbidden, sql, re.I):
+        raise RuntimeError("data-sources query is not admitted")
+    relations = re.findall(r"\b(?:from|join)\s+([A-Za-z_][A-Za-z0-9_]*)\.([A-Za-z_][A-Za-z0-9_]*)\.", sql, re.I)
+    if not relations or any(alias not in aliases for alias, _schema in relations):
         raise RuntimeError("data-sources query is not admitted")
     return sql
 
@@ -51,25 +56,32 @@ def _dsn(d: dict[str, Any]) -> str:
     return f"host={q(d['host'])} port={int(d['port'])} user={q(user)} password={q(password)} {database_key}={q(d['database'])}"
 
 async def _acquire_database_scope(source_ids: list[str], intent: str, max_rows: int | None = None, max_bytes: int | None = None):
-    # descriptor remains only in this coroutine and is never returned by a tool.
-    descriptors = await broker("database.acquire", source_ids=source_ids, intent=intent, max_rows=max_rows, max_bytes=max_bytes)
-    con = duckdb.connect()
+    con = None
     try:
+        # Descriptor acquisition, DSN composition and attach are one private
+        # region: no driver message can cross the public MCP boundary.
+        descriptors = await broker("database.acquire", source_ids=source_ids, intent=intent, max_rows=max_rows, max_bytes=max_bytes)
+        con = duckdb.connect()
         for d in descriptors:
             alias = d["id"]
-            if not re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", alias): raise RuntimeError("data-sources database is unavailable")
+            if not re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", alias): raise ValueError()
             extension = "mysql" if d["kind"] == "mysql" else "postgres"
             con.execute(f"INSTALL {extension}; LOAD {extension}")
             con.execute(f"ATTACH '{_dsn(d)}' AS {alias} (TYPE {extension.upper()}, READ_ONLY)")
-        yield con, min(d["maxRows"] for d in descriptors), min(d["maxBytes"] for d in descriptors)
+        yield con, min(d["maxRows"] for d in descriptors), min(d["maxBytes"] for d in descriptors), {d["id"] for d in descriptors}
+    except Exception:
+        raise RuntimeError("data-sources database is unavailable") from None
     finally:
-        con.close()
+        if con is not None: con.close()
 
 def _rows(cursor: Any, rows: int, bytes_: int) -> dict[str, Any]:
     result, size, truncated = [], 0, False
-    for row in cursor.fetchall():
+    while True:
+        row = cursor.fetchone()
+        if row is None: break
         encoded = json.dumps(row, default=str).encode()
-        if len(result) >= rows or size + len(encoded) > bytes_: truncated = True; break
+        if len(result) >= rows or size + len(encoded) > bytes_:
+            truncated = True; break
         result.append(list(row)); size += len(encoded)
     return {"columns": [c[0] for c in cursor.description], "rows": result, "truncated": truncated}
 
@@ -81,17 +93,17 @@ async def source_info(source_id: str) -> Any: return await broker("source_info",
 async def source_probe(source_id: str) -> Any: return await broker("source_probe", source_id=source_id)
 @mcp.tool()
 async def data_list(source_id: str, max_rows: int | None = None) -> Any:
-    async for con, rows, bytes_ in _acquire_database_scope([source_id], "list", max_rows=max_rows):
+    async for con, rows, bytes_, _aliases in _acquire_database_scope([source_id], "list", max_rows=max_rows):
         return _rows(con.execute("SELECT table_catalog, table_schema, table_name, table_type FROM information_schema.tables ORDER BY 1,2,3"), rows, bytes_)
 @mcp.tool()
 async def data_describe(source_id: str, object_id: str) -> Any:
     if not re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*\.[A-Za-z_][A-Za-z0-9_]*", object_id): raise RuntimeError("data-sources object is not admitted")
-    async for con, rows, bytes_ in _acquire_database_scope([source_id], "describe"):
+    async for con, rows, bytes_, _aliases in _acquire_database_scope([source_id], "describe"):
         return _rows(con.execute(f"DESCRIBE {source_id}.{object_id}"), rows, bytes_)
 @mcp.tool()
 async def data_query(source_ids: list[str], sql: str, max_rows: int | None = None, max_bytes: int | None = None) -> Any:
-    async for con, rows, bytes_ in _acquire_database_scope(source_ids, "query", max_rows, max_bytes):
-        return _rows(con.execute(_statement(sql)), rows, bytes_)
+    async for con, rows, bytes_, aliases in _acquire_database_scope(source_ids, "query", max_rows, max_bytes):
+        return _rows(con.execute(_statement(sql, aliases)), rows, bytes_)
 @mcp.tool()
 async def data_read(source_id: str, object_id: str, max_bytes: int | None = None) -> Any: return await broker("data_read", source_id=source_id, object_id=object_id, max_bytes=max_bytes)
 @mcp.tool()
