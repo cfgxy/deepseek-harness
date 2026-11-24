@@ -211,7 +211,10 @@ async def source_probe(source_id: str) -> Any:
 async def data_list(source_id: str, max_rows: int | None = None) -> Any:
     async for connection, rows, bytes_, scopes in _acquire_database_scope([source_id], "list", max_rows=max_rows):
         alias, revision = next((alias, revision) for alias, (id_, revision) in scopes.items() if id_ == source_id)
-        cursor = connection.execute(f"SELECT table_catalog, table_schema, table_name, table_type FROM information_schema.tables ORDER BY 1,2,3 LIMIT {rows + 1}")
+        cursor = connection.execute(
+            f"SELECT table_catalog, table_schema, table_name, table_type FROM information_schema.tables WHERE table_catalog = ? AND table_schema NOT IN ('information_schema', 'pg_catalog') ORDER BY 1,2,3 LIMIT {rows + 1}",
+            [alias],
+        )
         return _catalog(cursor, source_id, revision, alias, rows, bytes_)
 
 
