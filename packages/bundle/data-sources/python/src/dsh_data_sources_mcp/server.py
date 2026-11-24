@@ -72,12 +72,12 @@ async def _acquire_database_scope(source_ids: list[str], intent: str, max_rows: 
         descriptors = await broker("database.acquire", source_ids=source_ids, intent=intent, max_rows=max_rows, max_bytes=max_bytes)
         con = duckdb.connect()
         for d in descriptors:
-            alias = d["id"]
+            alias = d["queryAlias"]
             if not re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", alias): raise ValueError()
             extension = "mysql" if d["kind"] == "mysql" else "postgres"
             con.execute(f"INSTALL {extension}; LOAD {extension}")
             con.execute(f"ATTACH '{_dsn(d)}' AS {alias} (TYPE {extension.upper()}, READ_ONLY)")
-        yield con, min(d["maxRows"] for d in descriptors), min(d["maxBytes"] for d in descriptors), {d["id"] for d in descriptors}
+        yield con, min(d["maxRows"] for d in descriptors), min(d["maxBytes"] for d in descriptors), {d["id"]: d["queryAlias"] for d in descriptors}
     except Exception:
         raise RuntimeError("data-sources database is unavailable") from None
     finally:
@@ -107,12 +107,13 @@ async def data_list(source_id: str, max_rows: int | None = None) -> Any:
 @mcp.tool()
 async def data_describe(source_id: str, object_id: str) -> Any:
     if not re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*\.[A-Za-z_][A-Za-z0-9_]*", object_id): raise RuntimeError("data-sources object is not admitted")
-    async for con, rows, bytes_, _aliases in _acquire_database_scope([source_id], "describe"):
-        return _rows(con.execute(f"DESCRIBE {source_id}.{object_id}"), rows, bytes_)
+    async for con, rows, bytes_, aliases in _acquire_database_scope([source_id], "describe"):
+        alias = aliases[source_id]
+        return _rows(con.execute(f"DESCRIBE {alias}.{object_id}"), rows, bytes_)
 @mcp.tool()
 async def data_query(source_ids: list[str], sql: str, max_rows: int | None = None, max_bytes: int | None = None) -> Any:
-    async for con, rows, bytes_, aliases in _acquire_database_scope(source_ids, "query", max_rows, max_bytes):
-        return _rows(con.execute(_limited(_statement(sql, aliases), rows)), rows, bytes_)
+    async for con, rows, bytes_, source_aliases in _acquire_database_scope(source_ids, "query", max_rows, max_bytes):
+        return _rows(con.execute(_limited(_statement(sql, set(source_aliases.values())), rows)), rows, bytes_)
 @mcp.tool()
 async def data_read(source_id: str, object_id: str, max_bytes: int | None = None) -> Any: return await broker("data_read", source_id=source_id, object_id=object_id, max_bytes=max_bytes)
 @mcp.tool()
