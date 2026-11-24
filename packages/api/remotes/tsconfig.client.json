@@ -112,6 +112,9 @@
       "path": "../account-controller"
     },
     {
+      "path": "../../credentials/panuoyun-account"
+    },
+    {
       "path": "../../credentials/deepseek-account"
     }
   ]

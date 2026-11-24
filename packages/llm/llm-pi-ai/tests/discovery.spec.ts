@@ -549,3 +549,12 @@ describe('recorded provider listings', () => {
     await expect(ctx.llm.discoverModels('llm-pi-ai', { baseURL: server.url, api })).resolves.toEqual(models)
   })
 })
+
+describe('provider-scoped discovery metadata', () => {
+  it('keeps unverified Pa诺云 and other manual route models unknown', async () => {
+    const server = await listingServer({ body: JSON.stringify({ data: [{ id: 'gpt-5.6-terra' }] }) })
+    const unknown = [{ id: 'gpt-5.6-terra', name: 'gpt-5.6-terra' }]
+    await expect(discoverModels({ provider: 'panuoyun', baseURL: server.url, api: 'openai-completions', apiKey: 'fixture' })).resolves.toEqual(unknown)
+    await expect(discoverModels({ provider: 'manual-gateway', baseURL: server.url, api: 'openai-completions', apiKey: 'fixture' })).resolves.toEqual(unknown)
+  })
+})

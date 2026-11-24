@@ -26,6 +26,7 @@ import { INVALID_CREDENTIAL_CODE, LlmError, normalizeApiKey } from '@deepseek-ai
 import type { LlmDiscoveredModel, LlmModelDiscoveryOperation } from '@deepseek-ai/dsh-llm'
 import { attributionHeaders } from '@deepseek-ai/dsh-llm'
 import { catalogModels } from './catalog.ts'
+import { resolveModelMetadata } from './metadata.ts'
 
 /**
  * Protocols whose model listing this module can read. OpenAI protocols use
@@ -178,7 +179,7 @@ async function readBounded(response: Response, url: string): Promise<string> {
  * a working endpoint's catalog. Missing names fall back to the adopted id so
  * the Web form receives a complete human-readable row.
  */
-function readListing(body: unknown): LlmDiscoveredModel[] {
+function readListing(body: unknown, provider?: string): LlmDiscoveredModel[] {
   const listing = body as { data?: unknown; models?: unknown } | null
   const data = listing?.data
   let listed: { readonly key?: string; readonly raw: unknown }[]
@@ -219,11 +220,16 @@ function readListing(body: unknown): LlmDiscoveredModel[] {
       entry?.limit?.output,
       entry?.top_provider?.max_completion_tokens,
     )
+    const metadata = provider === undefined ? undefined : resolveModelMetadata(provider, id)
+    const resolvedContextWindow = contextWindow ?? metadata?.contextWindow
+    const resolvedMaxTokens = maxTokens ?? metadata?.maxTokens
     models.push({
       id,
       name,
-      ...contextWindow === undefined ? {} : { contextWindow },
-      ...maxTokens === undefined ? {} : { maxTokens },
+      ...resolvedContextWindow === undefined ? {} : { contextWindow: resolvedContextWindow },
+      ...resolvedMaxTokens === undefined ? {} : { maxTokens: resolvedMaxTokens },
+      ...metadata?.input === undefined ? {} : { inputModalities: [...metadata.input] },
+      ...metadata === undefined ? {} : { metadataSource: metadata.source },
     })
   }
   return models
@@ -359,5 +365,5 @@ export async function discoverModels(
   } catch (error: unknown) {
     throw new LlmError(`${url} did not answer with JSON`, 'DISCOVERY_FAILED', { cause: error })
   }
-  return readListing(body)
+  return readListing(body, request.provider)
 }

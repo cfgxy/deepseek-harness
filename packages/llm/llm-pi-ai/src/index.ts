@@ -95,6 +95,8 @@ export type {
 } from './config.ts'
 export { recordKeyFor } from './auth.ts'
 export { supportedProtocols } from './provider.ts'
+export { resolveModelMetadata } from './metadata.ts'
+export type { ModelMetadata, ModelMetadataSource } from './metadata.ts'
 export type { ImageCapabilityContext } from './image-capability.ts'
 
 export const name = 'llm-pi-ai'

@@ -107,6 +107,12 @@ export const VIEWER_ENDPOINT_CLASSES = {
   'credentials/describe': 'owner-only', // owner credentials; secrets never reach a reader
   'credentials/set': 'owner-only', // owner credentials; secrets never reach a reader
   'credentials/unset': 'owner-only', // owner credentials; secrets never reach a reader
+  'panuoyun/login': 'owner-only', // owner-only login submits credentials to the Host
+  'panuoyun/groups': 'owner-only', // owner-only account metadata behind the Host JWT
+  'panuoyun/selectApiKey': 'owner-only', // owner-selected API key must never traverse a shared viewer
+  'panuoyun/createApiKey': 'owner-only', // owner-only key provisioning; response contains a secret
+  'panuoyun/models': 'owner-only', // owner credential-backed model refresh
+  'panuoyun/signOut': 'owner-only', // owner credential and local route cleanup
   'settings/describe': 'owner-only', // owner settings
   'settings/mutate': 'owner-only', // owner settings
   'settings/openSettingsDocument': 'owner-only', // owner settings

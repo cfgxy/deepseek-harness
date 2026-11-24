@@ -21,7 +21,7 @@ import { AccountOnboarding } from './AccountOnboarding.tsx'
 import { AccountPlatformHost, type AccountPlatformHostInjected } from './AccountPlatformHost.tsx'
 import { AccountMenu } from './AccountMenu.tsx'
 import { createPlatformPages, type PlatformPages } from './platform-pages.ts'
-import { AccountSection, type AccountSnapshot, type AccountSectionInjected } from './AccountSection.tsx'
+import { AccountSection, type AccountSnapshot, type AccountSectionInjected, type PanuoyunOperations } from './AccountSection.tsx'
 import { createBonusNoticeController } from './bonus-notices.ts'
 import { accountClientMetadata } from './client-metadata.ts'
 import { en, ja, es, fr, de, ru, pt, zh, type AccountKey } from './locales.ts'
@@ -42,7 +42,7 @@ declare module '@deepseek-ai/dsh-client-ui-slots' {
 }
 
 /** Services required by account settings. */
-export const inject = ['slots', 'locale', 'remote', 'remote.account', 'remote.session', 'theme', 'configForms', 'remoteAccess']
+export const inject = ['slots', 'locale', 'remote', 'remote.account', 'remote.panuoyun', 'remote.settings', 'remote.session', 'theme', 'configForms', 'remoteAccess']
 /** Register account UI in Desktop and plain Web clients. @param ctx - client plugin context. */
 export function apply(ctx: Context): void {
   const desktop = 'dshDesktop' in globalThis
@@ -194,6 +194,36 @@ export function apply(ctx: Context): void {
       onClose(reason)
       if (reason === 'returned' && page === 'top-up') void refreshAfterReturn(refreshing, reRead)
     })
+  const panuoyun: PanuoyunOperations = {
+    async configure(mode, enterpriseLoginOrigin) {
+      const result = await ctx.remote.settings.mutate('panuoyun-account', [
+        { op: 'set', path: ['mode'], value: mode },
+        { op: 'set', path: ['enterpriseLoginOrigin'], value: enterpriseLoginOrigin },
+      ], undefined)
+      if (!result.ok) throw new Error('Pa诺云 configuration failed')
+    },
+    async login(email, password) {
+      const result = await ctx.remote.panuoyun.login(email, password)
+      if (!result.ok) throw new Error('Pa诺云 login failed')
+    },
+    async groups() {
+      const result = await ctx.remote.panuoyun.groups()
+      if (!result.ok) throw new Error('Pa诺云 groups request failed')
+      return result.value ?? []
+    },
+    async selectApiKey(key) {
+      const result = await ctx.remote.panuoyun.selectApiKey(key)
+      if (!result.ok) throw new Error('Pa诺云 API key setup failed')
+    },
+    async createApiKey(name, groupId) {
+      const result = await ctx.remote.panuoyun.createApiKey(name, groupId)
+      if (!result.ok) throw new Error('Pa诺云 API key creation failed')
+    },
+    async signOut() {
+      const result = await ctx.remote.panuoyun.signOut()
+      if (!result.ok) throw new Error('Pa诺云 sign out failed')
+    },
+  }
   const operations: AccountSectionInjected = {
     avatarFailed: (value) => { avatar.failed(value) },
     subscribeSessionExpired: listener => ctx.remote.$on('deepseek-account/session-expired', listener),
@@ -243,6 +273,7 @@ export function apply(ctx: Context): void {
         subscribe: listener => ctx.on('theme/change', listener),
       },
     },
+    panuoyun,
     async start() {
       publish({ ...snapshot, loginVisible: true, loginFailed: false })
       const transport = (globalThis as typeof globalThis & {

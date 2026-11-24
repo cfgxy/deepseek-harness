@@ -1,16 +1,29 @@
 .dialog {
   width: min(600px, 100%);
-  max-height: 100%;
+  max-height: min(720px, 100%);
+  gap: 0;
   padding: 0;
+  background: transparent;
+  box-shadow: none;
 }
 
+/* `headless` omits Modal's header and close chrome, not an opaque dialog
+   surface. Keeping material here makes every onboarding step legible above
+   the live workspace rather than relying on a particular step's own layout. */
 .content {
   display: flex;
   flex-direction: column;
+  width: 100%;
   min-height: 0;
+  max-height: 100%;
   padding: 28px;
   box-sizing: border-box;
   overflow-y: auto;
+  border: 0.5px solid var(--dsw-alias-border-l3);
+  border-radius: var(--dsw-radius-panel);
+  background: var(--dsw-alias-bg-layer-2);
+  box-shadow: var(--dsw-elevation-prominent);
+  color: var(--dsw-alias-label-primary);
 }
 
 .title {

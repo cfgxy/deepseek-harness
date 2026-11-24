@@ -148,6 +148,7 @@ export function ModelRow(props: ModelRowProps): ReactNode {
           <IconTrashOutlineRegular size={14} />
         </button>
         {modelField('name')}
+        {typeof model.metadataSource === 'string' ? <span className={styles['modelCatalogMeta']}>{`Metadata: ${model.metadataSource}`}</span> : null}
         {props.expanded
           ? (
             <div className={styles['modelAdvanced']}>
