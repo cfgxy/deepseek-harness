@@ -234,9 +234,11 @@ describe('read-only data source supervisor', () => {
   })
 
   it.each(['unix', 'tcp'] as const)('enforces bounded authenticated broker frames over %s', async (transport) => {
+    const responseOverhead = Buffer.byteLength(JSON.stringify({ ok: true, result: { value: '' } }))
     let aborted = false
     const broker = new DataSourcesBroker(async (request, signal) => {
-      if (request.operation === 'large') return { value: 'x'.repeat(65 * 1024) }
+      if (request.operation === 'boundary') return { value: 'x'.repeat(64 * 1024 - 1 - responseOverhead) }
+      if (request.operation === 'boundary-over') return { value: 'x'.repeat(64 * 1024 - responseOverhead) }
       if (request.operation === 'reject') throw new Error('private detail')
       if (request.operation === 'slow') return await new Promise((_resolve, reject) => signal.addEventListener('abort', () => { aborted = true; reject(new Error('aborted')) }, { once: true }))
       return { operation: request.operation }
@@ -247,7 +249,9 @@ describe('read-only data source supervisor', () => {
         .resolves.toBe('{"ok":false}\n')
       await expect(brokerRequest(bootstrap.endpoint, { capability: bootstrap.capability, operation: 'source_list', arguments: {} }))
         .resolves.toBe('{"ok":true,"result":{"operation":"source_list"}}\n')
-      await expect(brokerRequest(bootstrap.endpoint, { capability: bootstrap.capability, operation: 'large', arguments: {} }))
+      await expect(brokerRequest(bootstrap.endpoint, { capability: bootstrap.capability, operation: 'boundary', arguments: {} }))
+        .resolves.toSatisfy((response: string) => Buffer.byteLength(response) === 64 * 1024 && response.endsWith('\n'))
+      await expect(brokerRequest(bootstrap.endpoint, { capability: bootstrap.capability, operation: 'boundary-over', arguments: {} }))
         .resolves.toBe('{"ok":false}\n')
       await expect(brokerRequest(bootstrap.endpoint, { capability: bootstrap.capability, operation: 'reject', arguments: {} }))
         .resolves.toBe('{"ok":false}\n')

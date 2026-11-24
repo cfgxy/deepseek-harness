@@ -83,7 +83,7 @@ function write(socket: Socket, value: unknown): void {
   let payload = '{"ok":false}'
   try {
     const candidate = JSON.stringify(value)
-    if (Buffer.byteLength(candidate) <= MAX_FRAME_BYTES) payload = candidate
+    if (Buffer.byteLength(candidate) < MAX_FRAME_BYTES) payload = candidate
   } catch {}
   socket.end(`${payload}\n`)
 }
