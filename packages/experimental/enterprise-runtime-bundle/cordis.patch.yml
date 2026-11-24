@@ -1,3 +1,10 @@
+- id: typert-loader
+  config:
+    # The Runtime is loaded underneath this bundle rather than as a top-level
+    # Loader entry, so the Host must explicitly register its generated Remote.
+    packages:
+      - '@deepseek-ai/dsh-experimental-enterprise-runtime'
+
 - insert:
     - id: enterprise-runtime
       name: '@deepseek-ai/dsh-experimental-enterprise-runtime'

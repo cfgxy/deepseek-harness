@@ -1,6 +1,7 @@
 /** Persistent, declarative enterprise capability ZIP runtime. */
 
-import { Context, Service } from '@deepseek-ai/cordis'
+import { Context } from '@deepseek-ai/cordis'
+import { Remote, TypertRemoteService } from '@deepseek-ai/dsh-typert-protocol'
 import z from '@deepseek-ai/schemastery'
 import { defineTool } from '@deepseek-ai/dsh-tools'
 import type { JsonValue } from '@deepseek-ai/dsh-util-values'
@@ -8,6 +9,7 @@ import { mkdir, readFile, rename, rm, writeFile } from 'node:fs/promises'
 import { randomUUID } from 'node:crypto'
 import { join, relative, resolve } from 'node:path'
 import yauzl from 'yauzl'
+import type { RuntimeAppView as ClientRuntimeAppView } from './client.ts'
 
 /** Public manifest accepted from a second-level enterprise ZIP. */
 export interface RuntimeManifest {
@@ -17,6 +19,37 @@ export interface RuntimeManifest {
   readonly dependencies: readonly string[]
   readonly permissions: readonly string[]
   readonly entry: string
+  /** User-facing application identity rendered by the trusted Web projection. */
+  readonly app: RuntimeAppMetadata
+}
+
+/** Schema-validated user-facing metadata owned by each enterprise ZIP. */
+export interface RuntimeAppMetadata {
+  readonly name: string
+  readonly icon: string
+  readonly description: string
+  readonly category: string
+}
+
+export interface RuntimeAppPage {
+  readonly kind: RuntimeTemplate['kind']
+  readonly title: string
+  readonly fields?: readonly string[]
+  readonly chart?: 'bar' | 'line' | 'pie'
+  readonly x?: string
+  readonly y?: string
+  readonly sections?: readonly string[]
+}
+
+/** Safe Host-to-Web projection: metadata and a declarative page, never ZIP bytes, query payloads, or provider handles. */
+export interface RuntimeAppView {
+  readonly id: string
+  readonly version: string
+  readonly app: RuntimeAppMetadata
+  readonly page: RuntimeAppPage
+  /** An optional human-readable report question projected from a Langfuse-shaped declarative query. */
+  readonly question?: string
+  readonly active: boolean
 }
 
 /** Optional, independently-owned read-only data source capability. */
@@ -106,7 +139,7 @@ export function capabilityToolName(id: string, version: string): string {
  * Owns durable declarative package payloads and their real Cordis tool registrations.
  * ZIP content never receives this Context or the optional data-source provider.
  */
-export class EnterpriseRuntimeService extends Service {
+export class EnterpriseRuntimeService extends TypertRemoteService {
   static inject = ['tools']
   static Config: z<Config> = z.object({
     storageDir: z.string(),
@@ -231,6 +264,23 @@ export class EnterpriseRuntimeService extends Service {
     return { template: item.entry, rows: [...result.rows], ...result.nextCursor === undefined ? {} : { nextCursor: result.nextCursor } }
   }
 
+  /** Read-only user application projection for the browser; no archive bytes or Host facade cross this boundary. */
+  @Remote('apps')
+  apps(): readonly ClientRuntimeAppView[] {
+    return Object.values(this.inventory.packages).flatMap(versions => Object.values(versions).map(({ manifest, entry }) => {
+      const { query, dataAction: _dataAction, ...page } = entry
+      const question = isLangfuseQuestion(query)
+      return {
+        id: manifest.id,
+        version: manifest.version,
+        app: manifest.app,
+        page,
+        active: this.active.get(manifest.id)?.version === manifest.version,
+        ...question === undefined ? {} : { question },
+      }
+    }))
+  }
+
   private register(id: string, version: string): ActiveCapability {
     const toolName = capabilityToolName(id, version)
     const dispose = this.ctx.tools.register(defineTool({
@@ -289,10 +339,15 @@ function safeDestination(root: string, name: string): string {
   return path
 }
 
+function isLangfuseQuestion(query: JsonValue | undefined): string | undefined {
+  if (typeof query !== 'object' || query === null || Array.isArray(query)) return undefined
+  return query.source === 'langfuse' && typeof query.question === 'string' ? query.question : undefined
+}
+
 function parseManifest(raw: Uint8Array | undefined): RuntimeManifest {
   if (raw === undefined) throw new RuntimeError('manifest-missing')
   const value = JSON.parse(Buffer.from(raw).toString('utf8')) as Record<string, unknown>
-  for (const key of ['id', 'version', 'runtimeApi', 'dependencies', 'permissions', 'entry']) {
+  for (const key of ['id', 'version', 'runtimeApi', 'dependencies', 'permissions', 'entry', 'app']) {
     if (!(key in value)) throw new RuntimeError(`manifest-missing-${key}`)
   }
   if (typeof value.id !== 'string' || !/^[a-z0-9][a-z0-9.-]*$/.test(value.id)
@@ -301,6 +356,17 @@ function parseManifest(raw: Uint8Array | undefined): RuntimeManifest {
   if (!Array.isArray(value.dependencies) || !value.dependencies.every(item => typeof item === 'string')
     || !Array.isArray(value.permissions) || !value.permissions.every(item => item === 'data.read')) throw new RuntimeError('manifest-policy-invalid')
   if (typeof value.entry !== 'string' || value.entry.includes('..') || value.entry.includes('\\')) throw new RuntimeError('manifest-entry-invalid')
+  const app = value.app
+  if (typeof app !== 'object' || app === null || Array.isArray(app)) throw new RuntimeError('manifest-app-invalid')
+  const metadata = app as Record<string, unknown>
+  const name = metadata.name
+  const icon = metadata.icon
+  const description = metadata.description
+  const category = metadata.category
+  if (typeof name !== 'string' || !name.trim() || name.length > 80
+    || typeof icon !== 'string' || !icon.trim() || icon.length > 32
+    || typeof description !== 'string' || !description.trim() || description.length > 280
+    || typeof category !== 'string' || !category.trim() || category.length > 48) throw new RuntimeError('manifest-app-invalid')
   return value as unknown as RuntimeManifest
 }
 

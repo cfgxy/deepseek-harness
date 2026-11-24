@@ -20,6 +20,19 @@ const BUNDLE = '@deepseek-ai/dsh-experimental-enterprise-runtime-bundle'
 const BUNDLE_DIR = fileURLToPath(new URL('../../../packages/experimental/enterprise-runtime-bundle', import.meta.url))
 const RUNTIME_DIR = fileURLToPath(new URL('../../../packages/experimental/enterprise-runtime', import.meta.url))
 const CLIENT_DIR = fileURLToPath(new URL('../../../packages/experimental/client-ui-enterprise-runtime', import.meta.url))
+const FIXTURE_PATHS = [
+  ['basic.zip', 'Order desk', 'Operations'],
+  ['detail.zip', 'Order profile', 'Operations'],
+  ['chart.zip', 'Order analytics', 'Analytics'],
+  ['langfuse-report.zip', 'Trace insights', 'Insights'],
+] as const
+const APP_DEMOS = [
+  ['Order desk', 'list', 'Orders'],
+  ['Order profile', 'detail', 'Order detail'],
+  ['Order analytics', 'chart', 'Orders by status'],
+  ['Trace insights', 'report', 'Langfuse trace volume'],
+] as const
+const FIXTURE_DIR = fileURLToPath(new URL('../../../packages/experimental/enterprise-runtime/tests/fixtures', import.meta.url))
 const BASIC_ZIP_PATH = fileURLToPath(new URL('../../../packages/experimental/enterprise-runtime/tests/fixtures/basic.zip', import.meta.url))
 const BASIC_CAPABILITY = 'acme.orders'
 const BASIC_VERSION = '1.0.0'
@@ -58,6 +71,7 @@ describe('web e2e: Enterprise Runtime Plugin Manager contribution', () => {
     const runtimeEntry = [...scaffold.ctx.loader.entries()]
       .find(entry => entry.options.id === 'enterprise-runtime')
     expect(runtimeEntry?.fiber?.state).toBe(FiberState.ACTIVE)
+    expect(scaffold.ctx.typert.local.get('enterpriseRuntime/apps')).toBeDefined()
 
     browser = await chromium.launch()
     page = await newEnglishPage(browser)
@@ -80,7 +94,14 @@ describe('web e2e: Enterprise Runtime Plugin Manager contribution', () => {
     const zip = await readFile(BASIC_ZIP_PATH)
     const manifest = await runtime!.api.install(zip)
     expect(manifest).toMatchObject({ id: BASIC_CAPABILITY, version: BASIC_VERSION })
-    expect(runtime!.api.list()).toEqual([expect.objectContaining({ id: BASIC_CAPABILITY, version: BASIC_VERSION })])
+    const extraFixtures = []
+    for (const [filename] of FIXTURE_PATHS.slice(1)) {
+      extraFixtures.push(await runtime!.api.install(await readFile(join(FIXTURE_DIR, filename))))
+    }
+    expect(runtime!.api.list()).toEqual(expect.arrayContaining([
+      expect.objectContaining({ id: BASIC_CAPABILITY, version: BASIC_VERSION }),
+      ...extraFixtures.map(item => expect.objectContaining({ id: item.id, version: item.version })),
+    ]))
     runtime!.api.activate(BASIC_CAPABILITY, BASIC_VERSION)
 
     const tool = scaffold.ctx.tools.get(BASIC_TOOL)
@@ -89,6 +110,29 @@ describe('web e2e: Enterprise Runtime Plugin Manager contribution', () => {
     await expect(tool!.execute({}, { signal } as never)).resolves.toEqual({ template: { kind: 'list', title: 'Orders' } })
     const result = await runtime!.api.invoke(BASIC_CAPABILITY, signal)
     expect(result).toEqual({ template: { kind: 'list', title: 'Orders' } })
+
+    const plazaButton = page.getByRole('button', { name: 'Self-growing Engine', exact: true })
+    if (await plazaButton.count() === 0) {
+      await page.getByRole('button', { name: 'More', exact: true }).click()
+      await page.getByRole('menuitem', { name: 'Self-growing Engine', exact: true }).click()
+    } else await plazaButton.click()
+    const plaza = page.locator('[data-enterprise-runtime-plaza]')
+    await plaza.getByRole('heading', { name: 'Self-growing Engine', exact: true }).waitFor({ timeout: 15_000 })
+    for (const [, name, category] of FIXTURE_PATHS) {
+      await plaza.locator(`[data-enterprise-runtime-category="${category}"]`).getByRole('button', { name: new RegExp(name) }).waitFor()
+    }
+    if (EVIDENCE_PATH !== undefined) await page.screenshot({ path: `${EVIDENCE_PATH}.plaza.png`, fullPage: true })
+    for (const [name, kind, title] of APP_DEMOS) {
+      await plaza.getByRole('button', { name: new RegExp(name) }).click()
+      const demo = page.locator(`[data-enterprise-runtime-demo="${kind}"]`)
+      await demo.getByRole('heading', { name: title, exact: true }).waitFor()
+      if (kind === 'report') {
+        await demo.locator('[data-enterprise-runtime-question]').getByText('How many traces were recorded in the selected period?', { exact: true }).waitFor()
+        if (EVIDENCE_PATH !== undefined) await page.screenshot({ path: `${EVIDENCE_PATH}.report.png`, fullPage: true })
+      }
+      await page.getByRole('button', { name: 'Back to application plaza', exact: true }).click()
+      await plaza.getByRole('heading', { name: 'Self-growing Engine', exact: true }).waitFor()
+    }
 
     const panel = await openPlugins(page)
     const target = panel.locator(`[data-plugin-package="${BUNDLE}"]`)
