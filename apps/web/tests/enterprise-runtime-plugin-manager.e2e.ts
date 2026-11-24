@@ -1,8 +1,11 @@
 // Real Web composition for the Enterprise Runtime bundle: the profile installs
 // the first-level bundle, and Chromium verifies its detail-slot contribution
 // without exposing second-level ZIPs or Host APIs to the browser.
+import { readFile, writeFile } from 'node:fs/promises'
+import { createHash } from 'node:crypto'
 import { fileURLToPath } from 'node:url'
 import { join } from 'node:path'
+import type { EnterpriseRuntimeService } from '../../../packages/experimental/enterprise-runtime/src/index.ts'
 import type { Browser, Page } from 'playwright'
 import { chromium } from 'playwright'
 import { FiberState } from '@deepseek-ai/cordis'
@@ -17,6 +20,11 @@ const BUNDLE = '@deepseek-ai/dsh-experimental-enterprise-runtime-bundle'
 const BUNDLE_DIR = fileURLToPath(new URL('../../../packages/experimental/enterprise-runtime-bundle', import.meta.url))
 const RUNTIME_DIR = fileURLToPath(new URL('../../../packages/experimental/enterprise-runtime', import.meta.url))
 const CLIENT_DIR = fileURLToPath(new URL('../../../packages/experimental/client-ui-enterprise-runtime', import.meta.url))
+const BASIC_ZIP_PATH = fileURLToPath(new URL('../../../packages/experimental/enterprise-runtime/tests/fixtures/basic.zip', import.meta.url))
+const BASIC_CAPABILITY = 'acme.orders'
+const BASIC_VERSION = '1.0.0'
+const BASIC_TOOL = `enterprise_runtime_${Buffer.from(`${BASIC_CAPABILITY}@${BASIC_VERSION}`).toString('hex')}`
+const EVIDENCE_PATH = process.env.DSH_ENTERPRISE_RUNTIME_E2E_EVIDENCE
 const SNAPSHOT_DIR = fileURLToPath(new URL('./expected/enterprise-runtime-plugin-manager', import.meta.url))
 const DETAIL_EXPECTED = join(SNAPSHOT_DIR, 'detail.expected.md')
 const MODE = webSnapshotMode()
@@ -64,8 +72,24 @@ describe('web e2e: Enterprise Runtime Plugin Manager contribution', () => {
     await scaffold?.close()
   })
 
-  it('renders localized declarative capability information only for the Enterprise Runtime bundle', async () => {
+  it('runs a real enterprise ZIP through the active Host and renders only its localized detail contribution', async () => {
     onTestFailed(() => saveFailureShot(page, 'web-e2e-enterprise-runtime-plugin-manager'))
+    const runtime = scaffold.ctx.get('enterpriseRuntime') as EnterpriseRuntimeService | undefined
+    expect(runtime).toBeDefined()
+
+    const zip = await readFile(BASIC_ZIP_PATH)
+    const manifest = await runtime!.api.install(zip)
+    expect(manifest).toMatchObject({ id: BASIC_CAPABILITY, version: BASIC_VERSION })
+    expect(runtime!.api.list()).toEqual([expect.objectContaining({ id: BASIC_CAPABILITY, version: BASIC_VERSION })])
+    runtime!.api.activate(BASIC_CAPABILITY, BASIC_VERSION)
+
+    const tool = scaffold.ctx.tools.get(BASIC_TOOL)
+    expect(tool).toBeDefined()
+    const signal = new AbortController().signal
+    await expect(tool!.execute({}, { signal } as never)).resolves.toEqual({ template: { kind: 'list', title: 'Orders' } })
+    const result = await runtime!.api.invoke(BASIC_CAPABILITY, signal)
+    expect(result).toEqual({ template: { kind: 'list', title: 'Orders' } })
+
     const panel = await openPlugins(page)
     const target = panel.locator(`[data-plugin-package="${BUNDLE}"]`)
     await target.waitFor({ timeout: 15_000 })
@@ -75,6 +99,19 @@ describe('web e2e: Enterprise Runtime Plugin Manager contribution', () => {
     const prototype = detail.locator('[data-enterprise-runtime-prototype]')
     await prototype.waitFor({ timeout: 15_000 })
     await prototype.getByRole('heading', { name: 'Enterprise capability prototypes', exact: true }).waitFor()
+    if (EVIDENCE_PATH !== undefined) {
+      await page.screenshot({ path: `${EVIDENCE_PATH}.png`, fullPage: true })
+      await writeFile(EVIDENCE_PATH, JSON.stringify({
+        candidate: process.env.GIT_COMMIT ?? 'worktree',
+        fixture: 'packages/experimental/enterprise-runtime/tests/fixtures/basic.zip',
+        fixtureSha256: createHash('sha256').update(zip).digest('hex'),
+        manifest,
+        inventory: runtime!.api.list(),
+        tool: BASIC_TOOL,
+        invocation: result,
+        hostState: 'active',
+      }, null, 2) + '\n')
+    }
     for (const copy of [
       'List: a queryable collection.',
       'Detail: selected fields for one record.',
