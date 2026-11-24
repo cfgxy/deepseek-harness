@@ -1,12 +1,15 @@
 /** Persistent, declarative enterprise capability ZIP runtime. */
 
-import { Context, Service } from '@deepseek-ai/cordis'
+import { Context } from '@deepseek-ai/cordis'
+import { Remote, TypertRemoteService } from '@deepseek-ai/dsh-typert-protocol'
 import z from '@deepseek-ai/schemastery'
 import { defineTool } from '@deepseek-ai/dsh-tools'
+import type { JsonValue } from '@deepseek-ai/dsh-util-values'
 import { mkdir, readFile, rename, rm, writeFile } from 'node:fs/promises'
 import { randomUUID } from 'node:crypto'
 import { join, relative, resolve } from 'node:path'
 import yauzl from 'yauzl'
+import type { RuntimeAppView as ClientRuntimeAppView } from './client.ts'
 
 /** Public manifest accepted from a second-level enterprise ZIP. */
 export interface RuntimeManifest {
@@ -16,28 +19,103 @@ export interface RuntimeManifest {
   readonly dependencies: readonly string[]
   readonly permissions: readonly string[]
   readonly entry: string
+  /** User-facing application identity rendered by the trusted Web projection. */
+  readonly app: RuntimeAppMetadata
+}
+
+/** Schema-validated user-facing metadata owned by each enterprise ZIP. */
+export interface RuntimeAppMetadata {
+  readonly name: string
+  readonly icon: string
+  readonly description: string
+  readonly category: string
+}
+
+export interface RuntimeAppPage {
+  readonly kind: RuntimeTemplate['kind']
+  readonly title: string
+  readonly fields?: readonly string[]
+  readonly chart?: 'bar' | 'line' | 'pie'
+  readonly x?: string
+  readonly y?: string
+  readonly sections?: readonly string[]
+}
+
+/** Safe Host-to-Web projection: metadata and a declarative page, never ZIP bytes, query payloads, or provider handles. */
+export interface RuntimeAppView {
+  readonly id: string
+  readonly version: string
+  readonly app: RuntimeAppMetadata
+  readonly page: RuntimeAppPage
+  /** An optional human-readable report question projected from a Langfuse-shaped declarative query. */
+  readonly question?: string
+  readonly active: boolean
 }
 
 /** Optional, independently-owned read-only data source capability. */
 export interface DataSourceApiV1 {
   readonly apiVersion: '1'
-  execute(request: Readonly<{ query: unknown; cursor?: string; limit: number }>, signal: AbortSignal): Promise<Readonly<{ rows: readonly unknown[]; nextCursor?: string }>>
+  execute(
+    request: Readonly<{ query: JsonValue; cursor?: string; limit: number }>,
+    signal: AbortSignal,
+  ): Promise<Readonly<{ rows: readonly JsonValue[]; nextCursor?: string }>>
 }
 
-/** The only template this POC accepts. */
-export interface ListTemplate {
+/** Declarative screen templates accepted from a second-level enterprise ZIP. */
+export interface ListTemplate extends Record<string, JsonValue> {
   readonly kind: 'list'
   readonly title: string
   readonly dataAction?: 'query'
+  readonly query?: JsonValue
 }
 
-export interface RuntimeResult {
-  readonly template: ListTemplate
-  readonly rows?: readonly unknown[]
+export interface DetailTemplate extends Record<string, JsonValue> {
+  readonly kind: 'detail'
+  readonly title: string
+  readonly fields: string[]
+  readonly dataAction?: 'query'
+  readonly query?: JsonValue
+}
+
+export interface ChartTemplate extends Record<string, JsonValue> {
+  readonly kind: 'chart'
+  readonly title: string
+  readonly chart: 'bar' | 'line' | 'pie'
+  readonly x: string
+  readonly y: string
+  readonly dataAction?: 'query'
+  readonly query?: JsonValue
+}
+
+export interface ReportTemplate extends Record<string, JsonValue> {
+  readonly kind: 'report'
+  readonly title: string
+  readonly sections: string[]
+  readonly dataAction?: 'query'
+  readonly query?: JsonValue
+}
+
+export type RuntimeTemplate = ListTemplate | DetailTemplate | ChartTemplate | ReportTemplate
+
+/** Stable facade for first-level Plugin Manager, Host, and client integrations. */
+export interface EnterpriseRuntimeApiV1 {
+  readonly apiVersion: '1'
+  /** Install a trusted first-level ZIP through the service's validated, atomic pipeline. */
+  install(zip: Uint8Array): Promise<RuntimeManifest>
+  list(): readonly RuntimeManifest[]
+  activate(id: string, version: string): void
+  uninstall(id: string): Promise<void>
+  invoke(id: string, signal: AbortSignal): Promise<RuntimeResult | RuntimeError>
+}
+
+/** JSON-safe output returned by an active enterprise capability. */
+export interface RuntimeResult extends Record<string, JsonValue> {
+  readonly template: RuntimeTemplate
+  readonly rows?: JsonValue[]
   readonly nextCursor?: string
 }
 
-interface StoredPackage { manifest: RuntimeManifest; entry: ListTemplate }
+interface StoredPackage { manifest: RuntimeManifest; entry: RuntimeTemplate }
 interface Inventory { packages: Record<string, Record<string, StoredPackage>> }
 interface ActiveCapability { version: string; toolName: string; dispose: () => void }
 
@@ -61,7 +139,7 @@ export function capabilityToolName(id: string, version: string): string {
  * Owns durable declarative package payloads and their real Cordis tool registrations.
  * ZIP content never receives this Context or the optional data-source provider.
  */
-export class EnterpriseRuntimeService extends Service {
+export class EnterpriseRuntimeService extends TypertRemoteService {
   static inject = ['tools']
   static Config: z<Config> = z.object({
     storageDir: z.string(),
@@ -74,6 +152,15 @@ export class EnterpriseRuntimeService extends Service {
   private readonly limits: Required<Omit<Config, 'storageDir'>>
   private inventory: Inventory = { packages: {} }
   private readonly active = new Map<string, ActiveCapability>()
+  /** Public v1 facade for trusted first-level integrations; ZIP content and static client slots never receive it. */
+  readonly api: EnterpriseRuntimeApiV1 = {
+    apiVersion: '1',
+    install: zip => this.install(zip),
+    list: () => this.list(),
+    activate: (id, version) => this.activate(id, version),
+    uninstall: id => this.uninstall(id),
+    invoke: (id, signal) => this.invoke(id, signal),
+  }
 
   constructor(ctx: Context, config: Config) {
     super(ctx, 'enterpriseRuntime')
@@ -119,14 +206,16 @@ export class EnterpriseRuntimeService extends Service {
       }
       await mkdir(resolve(destination, '..'), { recursive: true })
       await rename(staging, destination)
-      const versions = existing ?? {}
-      versions[manifest.version] = { manifest, entry }
-      this.inventory.packages[manifest.id] = versions
+      const versions = { ...existing, [manifest.version]: { manifest, entry } }
+      this.inventory = {
+        packages: { ...this.inventory.packages, [manifest.id]: versions },
+      }
       try {
         await this.save()
       } catch (error) {
-        delete versions[manifest.version]
-        if (existing === undefined) delete this.inventory.packages[manifest.id]
+        this.inventory = existing === undefined
+          ? { packages: withoutKey(this.inventory.packages, manifest.id) }
+          : { packages: { ...this.inventory.packages, [manifest.id]: existing } }
         await rm(destination, { recursive: true, force: true })
         throw error
       }
@@ -142,8 +231,8 @@ export class EnterpriseRuntimeService extends Service {
    * A registration failure leaves the old model-facing tool and payload unchanged.
    */
   activate(id: string, version: string): void {
-    const stored = this.package(id, version)
-    const next = this.register(id, version, stored.entry)
+    this.package(id, version)
+    const next = this.register(id, version)
     const previous = this.active.get(id)
     this.active.set(id, next)
     previous?.dispose()
@@ -153,7 +242,7 @@ export class EnterpriseRuntimeService extends Service {
   async uninstall(id: string): Promise<void> {
     this.active.get(id)?.dispose()
     this.active.delete(id)
-    delete this.inventory.packages[id]
+    this.inventory = { packages: withoutKey(this.inventory.packages, id) }
     await rm(resolve(this.root, id), { recursive: true, force: true })
     await this.save()
   }
@@ -171,11 +260,28 @@ export class EnterpriseRuntimeService extends Service {
     if (item.entry.dataAction !== 'query') return { template: item.entry }
     const source = this.ctx.get('dataSourceApi')
     if (source === undefined || source.apiVersion !== '1') return new RuntimeError('data-source-unavailable')
-    const result = await source.execute({ query: { template: item.entry.title }, limit: 100 }, signal)
+    const result = await source.execute({ query: item.entry.query ?? { template: item.entry.title }, limit: 100 }, signal)
     return { template: item.entry, rows: [...result.rows], ...result.nextCursor === undefined ? {} : { nextCursor: result.nextCursor } }
   }
 
-  private register(id: string, version: string, entry: ListTemplate): ActiveCapability {
+  /** Read-only user application projection for the browser; no archive bytes or Host facade cross this boundary. */
+  @Remote('apps')
+  apps(): readonly ClientRuntimeAppView[] {
+    return Object.values(this.inventory.packages).flatMap(versions => Object.values(versions).map(({ manifest, entry }) => {
+      const { query, dataAction: _dataAction, ...page } = entry
+      const question = isLangfuseQuestion(query)
+      return {
+        id: manifest.id,
+        version: manifest.version,
+        app: manifest.app,
+        page,
+        active: this.active.get(manifest.id)?.version === manifest.version,
+        ...question === undefined ? {} : { question },
+      }
+    }))
+  }
+
+  private register(id: string, version: string): ActiveCapability {
     const toolName = capabilityToolName(id, version)
     const dispose = this.ctx.tools.register(defineTool({
       name: toolName,
@@ -208,11 +314,18 @@ export class EnterpriseRuntimeService extends Service {
   }
 }
 
+/** Loader entry point; the named export remains available to direct Host integrations. */
+export default EnterpriseRuntimeService
+
 declare module '@deepseek-ai/cordis' {
   interface Context {
     enterpriseRuntime: EnterpriseRuntimeService
     dataSourceApi?: DataSourceApiV1
   }
+}
+
+function withoutKey<T>(record: Record<string, T>, key: string): Record<string, T> {
+  return Object.fromEntries(Object.entries(record).filter(([candidate]) => candidate !== key))
 }
 
 function packageDirectory(root: string, manifest: RuntimeManifest): string {
@@ -226,10 +339,15 @@ function safeDestination(root: string, name: string): string {
   return path
 }
 
+function isLangfuseQuestion(query: JsonValue | undefined): string | undefined {
+  if (typeof query !== 'object' || query === null || Array.isArray(query)) return undefined
+  return query.source === 'langfuse' && typeof query.question === 'string' ? query.question : undefined
+}
+
 function parseManifest(raw: Uint8Array | undefined): RuntimeManifest {
   if (raw === undefined) throw new RuntimeError('manifest-missing')
   const value = JSON.parse(Buffer.from(raw).toString('utf8')) as Record<string, unknown>
-  for (const key of ['id', 'version', 'runtimeApi', 'dependencies', 'permissions', 'entry']) {
+  for (const key of ['id', 'version', 'runtimeApi', 'dependencies', 'permissions', 'entry', 'app']) {
     if (!(key in value)) throw new RuntimeError(`manifest-missing-${key}`)
   }
   if (typeof value.id !== 'string' || !/^[a-z0-9][a-z0-9.-]*$/.test(value.id)
@@ -238,38 +356,92 @@ function parseManifest(raw: Uint8Array | undefined): RuntimeManifest {
   if (!Array.isArray(value.dependencies) || !value.dependencies.every(item => typeof item === 'string')
     || !Array.isArray(value.permissions) || !value.permissions.every(item => item === 'data.read')) throw new RuntimeError('manifest-policy-invalid')
   if (typeof value.entry !== 'string' || value.entry.includes('..') || value.entry.includes('\\')) throw new RuntimeError('manifest-entry-invalid')
+  const app = value.app
+  if (typeof app !== 'object' || app === null || Array.isArray(app)) throw new RuntimeError('manifest-app-invalid')
+  const metadata = app as Record<string, unknown>
+  const name = metadata.name
+  const icon = metadata.icon
+  const description = metadata.description
+  const category = metadata.category
+  if (typeof name !== 'string' || !name.trim() || name.length > 80
+    || typeof icon !== 'string' || !icon.trim() || icon.length > 32
+    || typeof description !== 'string' || !description.trim() || description.length > 280
+    || typeof category !== 'string' || !category.trim() || category.length > 48) throw new RuntimeError('manifest-app-invalid')
   return value as unknown as RuntimeManifest
 }
 
-function parseEntry(raw: Uint8Array | undefined): ListTemplate {
+function parseEntry(raw: Uint8Array | undefined): RuntimeTemplate {
   if (raw === undefined) throw new RuntimeError('entry-missing')
   const value = JSON.parse(Buffer.from(raw).toString('utf8')) as Record<string, unknown>
-  if (value.kind !== 'list' || typeof value.title !== 'string' || (value.dataAction !== undefined && value.dataAction !== 'query')) throw new RuntimeError('template-invalid')
-  return value as ListTemplate
+  const dataAction: 'query' | undefined = value.dataAction === 'query' ? 'query' : undefined
+  if (typeof value.title !== 'string' || (value.dataAction !== undefined && dataAction === undefined)) throw new RuntimeError('template-invalid')
+  const action = dataAction === undefined ? {} : { dataAction }
+  const query = value.query === undefined ? {} : { query: value.query as JsonValue }
+  const base = { title: value.title, ...action, ...query }
+  if (value.kind === 'list') return { kind: 'list', ...base }
+  if (value.kind === 'detail' && Array.isArray(value.fields) && value.fields.every(field => typeof field === 'string')) {
+    return { kind: 'detail', ...base, fields: value.fields }
+  }
+  if (value.kind === 'chart' && (value.chart === 'bar' || value.chart === 'line' || value.chart === 'pie')
+    && typeof value.x === 'string' && typeof value.y === 'string') {
+    return { kind: 'chart', ...base, chart: value.chart, x: value.x, y: value.y }
+  }
+  if (value.kind === 'report' && Array.isArray(value.sections) && value.sections.every(section => typeof section === 'string')) {
+    return { kind: 'report', ...base, sections: value.sections }
+  }
+  throw new RuntimeError('template-invalid')
 }
 
 function readZip(zip: Uint8Array, limits: Required<Omit<Config, 'storageDir'>>): Promise<Map<string, Uint8Array>> {
-  return new Promise((resolvePromise, reject) => yauzl.fromBuffer(Buffer.from(zip), { lazyEntries: true, validateEntrySizes: true }, (openError, archive) => {
-    if (openError !== null || archive === undefined) { reject(new RuntimeError(openError?.message.includes('relative path') ? 'unsafe-path' : 'zip-invalid')); return }
-    const files = new Map<string, Uint8Array>()
-    let total = 0
-    let count = 0
-    archive.on('entry', entry => {
-      try {
-        safeDestination('/', entry.fileName)
-        if (files.has(entry.fileName)) throw new RuntimeError('duplicate-zip-member')
-        if (++count > limits.maxFiles || (total += entry.uncompressedSize) > limits.maxUnpackedBytes) throw new RuntimeError('zip-limits-exceeded')
-        archive.openReadStream(entry, (streamError, stream) => {
-          if (streamError !== null || stream === undefined) { archive.close(); reject(streamError); return }
-          const chunks: Buffer[] = []
-          stream.on('data', chunk => chunks.push(chunk))
-          stream.on('end', () => { files.set(entry.fileName, Buffer.concat(chunks)); archive.readEntry() })
-          stream.on('error', error => { archive.close(); reject(error) })
+  return new Promise((resolvePromise, reject) => {
+    yauzl.fromBuffer(
+      Buffer.from(zip),
+      { lazyEntries: true, validateEntrySizes: true },
+      (openError, archive) => {
+        if (openError !== null || archive === undefined) {
+          const code = openError?.message.includes('relative path') ? 'unsafe-path' : 'zip-invalid'
+          reject(new RuntimeError(code))
+          return
+        }
+        const files = new Map<string, Uint8Array>()
+        let total = 0
+        let count = 0
+        archive.on('entry', (entry) => {
+          try {
+            safeDestination('/', entry.fileName)
+            if (files.has(entry.fileName)) throw new RuntimeError('duplicate-zip-member')
+            if (++count > limits.maxFiles || (total += entry.uncompressedSize) > limits.maxUnpackedBytes) {
+              throw new RuntimeError('zip-limits-exceeded')
+            }
+            archive.openReadStream(entry, (streamError, stream) => {
+              if (streamError !== null || stream === undefined) {
+                archive.close()
+                reject(streamError)
+                return
+              }
+              const chunks: Buffer[] = []
+              stream.on('data', chunk => chunks.push(chunk))
+              stream.on('end', () => {
+                files.set(entry.fileName, Buffer.concat(chunks))
+                archive.readEntry()
+              })
+              stream.on('error', (error) => {
+                archive.close()
+                reject(error)
+              })
+            })
+          } catch (error) {
+            archive.close()
+            reject(error)
+          }
         })
-      } catch (error) { archive.close(); reject(error) }
-    })
-    archive.on('end', () => resolvePromise(files))
-    archive.on('error', error => reject(new RuntimeError(error.message.includes('relative path') ? 'unsafe-path' : 'zip-invalid')))
-    archive.readEntry()
-  }))
+        archive.on('end', () => resolvePromise(files))
+        archive.on('error', (error) => {
+          const code = error.message.includes('relative path') ? 'unsafe-path' : 'zip-invalid'
+          reject(new RuntimeError(code))
+        })
+        archive.readEntry()
+      },
+    )
+  })
 }
