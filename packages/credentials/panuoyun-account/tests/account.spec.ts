@@ -201,7 +201,7 @@ describe('PanuoyunAccount', () => {
     await test.dispose()
   })
 
-  it('uses the personal API origin by default', async () => {
+  it('uses the personal API origin and personal login path by default', async () => {
     const fetch = vi.fn(async () => response(200, { code: 0, data: { access_token: 'jwt-secret' } }))
     vi.stubGlobal('fetch', fetch)
     const test = await mount()
@@ -211,7 +211,7 @@ describe('PanuoyunAccount', () => {
     await test.dispose()
   })
 
-  it('uses the enterprise login origin only for login, preserving the fixed enterprise API origin', async () => {
+  it('uses the enterprise login origin and enterprise login path while preserving the fixed enterprise API origin', async () => {
     const fetch = vi.fn()
       .mockResolvedValueOnce(response(200, { code: 0, data: { access_token: 'jwt-secret' } }))
       .mockResolvedValueOnce(response(200, { code: 0, data: [{ id: 7, name: 'Engineering' }] }))
@@ -222,7 +222,7 @@ describe('PanuoyunAccount', () => {
 
     await test.account.login('member@example.com', 'password-secret')
     await test.account.groups()
-    expect(fetch).toHaveBeenNthCalledWith(1, 'https://tenant.ainoriahub.com/api/v1/auth/login', expect.any(Object))
+    expect(fetch).toHaveBeenNthCalledWith(1, 'https://tenant.ainoriahub.com/api/v1/enterprise/auth/login', expect.any(Object))
     expect(fetch).toHaveBeenNthCalledWith(2, 'https://api.ainoriahub.com/api/v1/groups/available', expect.any(Object))
     await test.dispose()
   })

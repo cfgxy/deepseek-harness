@@ -72,7 +72,7 @@ export class PanuoyunAccount extends TypertRemoteService {
   @Remote
   async login(email: string, password: string): Promise<void> {
     const connection = this.connection()
-    const response = await fetch(`${connection.loginOrigin}/api/v1/auth/login`, {
+    const response = await fetch(`${connection.loginOrigin}${connection.loginPath}`, {
       method: 'POST', headers: { accept: 'application/json', 'content-type': 'application/json' },
       body: JSON.stringify({ email, password }),
     })
@@ -137,11 +137,21 @@ export class PanuoyunAccount extends TypertRemoteService {
     await Promise.all([this.ctx.credentials.unset(PANUOYUN_JWT_REF), this.ctx.credentials.unset(PANUOYUN_API_KEY_REF)])
   }
 
-  /** Resolve one operation's fixed API origin and its separately scoped login origin. */
-  private connection(): { apiOrigin: string; loginOrigin: string } {
+  /** Resolve one operation's fixed API origin, separately scoped login origin, and mode-specific login endpoint. */
+  private connection(): { apiOrigin: string; loginOrigin: string; loginPath: string } {
     const mode = this.config.mode.get()
-    if (mode === 'personal') return { apiOrigin: PANUOYUN_PERSONAL_API_ORIGIN, loginOrigin: PANUOYUN_PERSONAL_API_ORIGIN }
-    return { apiOrigin: PANUOYUN_ENTERPRISE_API_ORIGIN, loginOrigin: enterpriseLoginOrigin(this.config.enterpriseLoginOrigin.get()) }
+    if (mode === 'personal') {
+      return {
+        apiOrigin: PANUOYUN_PERSONAL_API_ORIGIN,
+        loginOrigin: PANUOYUN_PERSONAL_API_ORIGIN,
+        loginPath: '/api/v1/auth/login',
+      }
+    }
+    return {
+      apiOrigin: PANUOYUN_ENTERPRISE_API_ORIGIN,
+      loginOrigin: enterpriseLoginOrigin(this.config.enterpriseLoginOrigin.get()),
+      loginPath: '/api/v1/enterprise/auth/login',
+    }
   }
 
   private async authorized(path: string, operation: string, init: RequestInit = {}): Promise<Response> {
