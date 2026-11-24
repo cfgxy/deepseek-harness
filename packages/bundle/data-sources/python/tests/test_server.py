@@ -11,6 +11,21 @@ from mcp import ClientSession, StdioServerParameters
 from mcp.client.stdio import stdio_client
 
 
+from dsh_data_sources_mcp.server import _statement
+
+
+class QueryAdmissionTests(unittest.TestCase):
+    def test_rejects_table_functions_and_unadmitted_relations(self) -> None:
+        aliases = {"pg"}
+        with self.assertRaisesRegex(RuntimeError, "not admitted"):
+            _statement("SELECT * FROM read_csv_auto('secret.csv')", aliases)
+        with self.assertRaisesRegex(RuntimeError, "not admitted"):
+            _statement("SELECT * FROM pg.public.orders JOIN other.public.payments ON orders.id = payments.id", aliases)
+
+    def test_accepts_only_admitted_three_part_relations(self) -> None:
+        self.assertIn("pg.public.orders", _statement("SELECT pg.public.orders.id FROM pg.public.orders", {"pg"}))
+
+
 class BrokeredMcpTests(unittest.IsolatedAsyncioTestCase):
     async def asyncSetUp(self) -> None:
         self.directory = tempfile.TemporaryDirectory()

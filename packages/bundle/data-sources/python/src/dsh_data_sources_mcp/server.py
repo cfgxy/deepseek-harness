@@ -35,17 +35,26 @@ async def broker(operation: str, **arguments: Any) -> Any:
         if writer is not None:
             writer.close(); await writer.wait_closed()
 
+RELATION = r"[A-Za-z_][A-Za-z0-9_]*\.[A-Za-z_][A-Za-z0-9_]*\.[A-Za-z_][A-Za-z0-9_]*"
+
+
 def _statement(sql: str, aliases: set[str]) -> str:
     sql = sql.strip()
-    forbidden = r"\b(attach|install|load|copy|pragma|insert|update|delete|merge|alter|drop|create|grant|revoke|call|read_csv|read_parquet|read_json|glob)\b"
-    # Deliberately narrow grammar: no comments, table functions, or unqualified
-    # relations; every database reference must begin with an admitted alias.
-    if not re.match(r"^select\b", sql, re.I) or ";" in sql or "--" in sql or "/*" in sql or re.search(forbidden, sql, re.I):
-        raise RuntimeError("data-sources query is not admitted")
-    relations = re.findall(r"\b(?:from|join)\s+([A-Za-z_][A-Za-z0-9_]*)\.([A-Za-z_][A-Za-z0-9_]*)\.", sql, re.I)
-    if not relations or any(alias not in aliases for alias, _schema in relations):
+    # Phase-one grammar intentionally excludes CTEs, subqueries, functions,
+    # expressions and comments. Every target is parsed as a three-part relation.
+    match = re.fullmatch(
+        rf"SELECT\s+[A-Za-z0-9_.*,\s]+\s+FROM\s+({RELATION})(?:\s+JOIN\s+({RELATION})\s+ON\s+[A-Za-z0-9_.=\s]+)*(?:\s+WHERE\s+[A-Za-z0-9_.=\s]+)?(?:\s+ORDER\s+BY\s+[A-Za-z0-9_.,\s]+)?",
+        sql, re.I,
+    )
+    if match is None: raise RuntimeError("data-sources query is not admitted")
+    targets = re.findall(rf"\b(?:FROM|JOIN)\s+({RELATION})", sql, re.I)
+    if not targets or any(target.split(".", 1)[0] not in aliases for target in targets):
         raise RuntimeError("data-sources query is not admitted")
     return sql
+
+
+def _limited(statement: str, rows: int) -> str:
+    return f"SELECT * FROM ({statement}) AS dsh_scoped_query LIMIT {rows + 1}"
 
 def _dsn(d: dict[str, Any]) -> str:
     secret = json.loads(d["credential"])
@@ -94,7 +103,7 @@ async def source_probe(source_id: str) -> Any: return await broker("source_probe
 @mcp.tool()
 async def data_list(source_id: str, max_rows: int | None = None) -> Any:
     async for con, rows, bytes_, _aliases in _acquire_database_scope([source_id], "list", max_rows=max_rows):
-        return _rows(con.execute("SELECT table_catalog, table_schema, table_name, table_type FROM information_schema.tables ORDER BY 1,2,3"), rows, bytes_)
+        return _rows(con.execute(f"SELECT table_catalog, table_schema, table_name, table_type FROM information_schema.tables ORDER BY 1,2,3 LIMIT {rows + 1}"), rows, bytes_)
 @mcp.tool()
 async def data_describe(source_id: str, object_id: str) -> Any:
     if not re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*\.[A-Za-z_][A-Za-z0-9_]*", object_id): raise RuntimeError("data-sources object is not admitted")
@@ -103,7 +112,7 @@ async def data_describe(source_id: str, object_id: str) -> Any:
 @mcp.tool()
 async def data_query(source_ids: list[str], sql: str, max_rows: int | None = None, max_bytes: int | None = None) -> Any:
     async for con, rows, bytes_, aliases in _acquire_database_scope(source_ids, "query", max_rows, max_bytes):
-        return _rows(con.execute(_statement(sql, aliases)), rows, bytes_)
+        return _rows(con.execute(_limited(_statement(sql, aliases), rows)), rows, bytes_)
 @mcp.tool()
 async def data_read(source_id: str, object_id: str, max_bytes: int | None = None) -> Any: return await broker("data_read", source_id=source_id, object_id=object_id, max_bytes=max_bytes)
 @mcp.tool()
