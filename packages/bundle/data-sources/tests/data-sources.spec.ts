@@ -13,6 +13,7 @@ import { Config as BundleConfig, DataSourcesRemote } from '../src/index.ts'
 import { LocalDirectoryConnector } from '../src/local-directory.ts'
 import { MysqlConnector } from '../src/mysql.ts'
 import { S3Connector } from '../src/s3.ts'
+import { SftpConnector } from '../src/sftp.ts'
 import { PostgreSqlConnector } from '../src/postgresql.ts'
 import { ConnectorSupervisor, type ConnectorRequest, type ReadConnector } from '../src/supervisor.ts'
 import { assertSourceConfig, type ReadOperation, type SourceConfig, type SourceKind } from '../src/types.ts'
@@ -239,6 +240,32 @@ describe('read-only data source supervisor', () => {
     }
   })
 
+  it('stops SFTP object and directory output streams at their byte or row sentinel', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'dsh-sftp-stream-'))
+    const privateKey = join(root, 'private')
+    const knownHosts = join(root, 'known_hosts')
+    const curl = join(root, 'curl')
+    const originalPath = process.env.PATH
+    try {
+      await execFileAsync('ssh-keygen', ['-q', '-t', 'ed25519', '-N', '', '-f', privateKey])
+      await writeFile(knownHosts, `fixture ${await readFile(`${privateKey}.pub`, 'utf8')}`)
+      await writeFile(curl, '#!/bin/sh\ncase " $* " in *" --list-only "*) while :; do printf "entry\\n"; done ;; *) while :; do printf x; done ;; esac\n', { mode: 0o755 })
+      process.env.PATH = `${root}:${originalPath ?? ''}`
+      const sftp: SourceConfig = {
+        ...source('sftp'), connection: { host: 'fixture', knownHostsPath: knownHosts, timeoutMs: 1_000 },
+        policy: { maxBytes: 32, maxRows: 1, allowedPath: '/' },
+      }
+      const credential = JSON.stringify({ username: 'fixture', privateKey: await readFile(privateKey, 'utf8') })
+      await expect(new SftpConnector().execute({ source: sftp, credential, request: { apiVersion: 'v1', sourceId: sftp.id, operation: 'object.read', input: { path: '/object' }, maxBytes: 4, maxRows: 1 } }))
+        .resolves.toMatchObject({ data: { content: 'xxxx', bytes: 4 }, truncated: true })
+      await expect(new SftpConnector().execute({ source: sftp, credential, request: { apiVersion: 'v1', sourceId: sftp.id, operation: 'directory.list', input: { path: '/' }, maxBytes: 32, maxRows: 1 } }))
+        .resolves.toMatchObject({ data: { entries: ['entry'] }, truncated: true })
+    } finally {
+      process.env.PATH = originalPath
+      await rm(root, { recursive: true, force: true })
+    }
+  })
+
   it('rejects an oversized PostgreSQL frame before its body is materialized', async () => {
     const server = createServer((socket) => {
       socket.once('data', () => {
@@ -285,7 +312,7 @@ describe('read-only data source supervisor', () => {
       const url = new URL(incoming.url!, 'http://fixture.invalid')
       if (url.searchParams.get('list-type') === '2') {
         catalogLimit = url.searchParams.get('max-keys')
-        response.end('<ListBucketResult><Key>reports/a</Key><Key>reports/b</Key><Key>reports/c</Key></ListBucketResult>')
+        response.write('<ListBucketResult><Key>reports/a</Key><Key>reports/b</Key><Key>reports/c</Key>' + 'x'.repeat(256))
       } else {
         range = incoming.headers.range
         response.write('abcde')
@@ -297,14 +324,14 @@ describe('read-only data source supervisor', () => {
     if (address === null || typeof address === 'string') throw new Error('fixture server has no HTTP port')
     const s3: SourceConfig = {
       ...source('s3'), connection: { endpoint: `http://127.0.0.1:${address.port}`, bucket: 'fixture', timeoutMs: 1_000 },
-      policy: { maxBytes: 64, maxRows: 2, allowedPrefix: 'reports/' },
+      policy: { maxBytes: 128, maxRows: 2, allowedPrefix: 'reports/' },
     }
     const credential = JSON.stringify({ accessKeyId: 'fixture', secretAccessKey: 'fixture' })
     try {
       await expect(new S3Connector().execute({ source: s3, credential, request: { apiVersion: 'v1', sourceId: s3.id, operation: 'object.read', input: { path: 'reports/a' }, maxBytes: 4, maxRows: 2 } }))
         .resolves.toMatchObject({ data: { content: 'abcd', bytes: 4 }, truncated: true })
       expect(range).toBe('bytes=0-4')
-      await expect(new S3Connector().execute({ source: s3, credential, request: { apiVersion: 'v1', sourceId: s3.id, operation: 'catalog', input: {}, maxBytes: 64, maxRows: 2 } }))
+      await expect(new S3Connector().execute({ source: s3, credential, request: { apiVersion: 'v1', sourceId: s3.id, operation: 'catalog', input: {}, maxBytes: 128, maxRows: 2 } }))
         .resolves.toMatchObject({ data: { keys: ['reports/a', 'reports/b'] }, truncated: true })
       expect(catalogLimit).toBe('3')
     } finally {

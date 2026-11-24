@@ -104,7 +104,9 @@ async function startFixture(): Promise<Fixture> {
       await run('sftp', ['-q', '-P', String(sftpPort), '-o', 'BatchMode=yes', '-o', 'StrictHostKeyChecking=yes', '-o', `UserKnownHostsFile=${knownHosts}`, '-i', join(ssh, 'id_ed25519'), '-b', sftpBatch, 'fixture@127.0.0.1'])
     })
     const wrongKnownHosts = join(ssh, 'wrong_known_hosts')
-    await writeFile(wrongKnownHosts, '127.0.0.1 ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIEeWFAKEHOSTKEY0000000000000000000000000\n')
+    const wrongPrivateKey = join(ssh, 'wrong_host')
+    await run('ssh-keygen', ['-q', '-t', 'ed25519', '-N', '', '-f', wrongPrivateKey])
+    await writeFile(wrongKnownHosts, `[127.0.0.1]:${sftpPort} ${await readFile(`${wrongPrivateKey}.pub`, 'utf8')}`)
     return { root, local, s3Port, sftpPort, mysqlPort, postgresPort, privateKey: join(ssh, 'id_ed25519'), knownHosts, wrongKnownHosts, containers: names }
   } catch (error) {
     await Promise.allSettled(names.map(name => run('docker', ['rm', '-f', name])))

@@ -1,4 +1,4 @@
-import { open, readdir, realpath, stat } from 'node:fs/promises'
+import { opendir, open, realpath, stat } from 'node:fs/promises'
 import type { Dirent } from 'node:fs'
 import { resolve, sep } from 'node:path'
 import type { ConnectorRequest, ReadConnector } from './supervisor.ts'
@@ -43,18 +43,19 @@ export class LocalDirectoryConnector implements ReadConnector {
 
     if (request.request.operation === 'directory.list') {
       if (!(await stat(target)).isDirectory()) throw new Error(`data-sources: ${target} is not a directory`)
-      const entries = await readdir(target, { withFileTypes: true })
+      const directory = await opendir(target, { bufferSize: 1 })
       const data: { name: string; kind: 'directory' | 'file' | 'other' }[] = []
-      let bytes = 0
-      let truncated = false
-      for (const entry of entries) {
-        if (data.length === maxRows) { truncated = true; break }
-        const item = { name: entry.name, kind: entryKind(entry) }
-        const itemBytes = Buffer.byteLength(JSON.stringify(item))
-        if (bytes + itemBytes > maxBytes) { truncated = true; break }
-        data.push(item)
-        bytes += itemBytes
-      }
+      let bytes = 0; let truncated = false
+      try {
+        for await (const entry of directory) {
+          if (data.length === maxRows) { truncated = true; break }
+          const item = { name: entry.name, kind: entryKind(entry) }
+          const itemBytes = Buffer.byteLength(JSON.stringify(item))
+          if (bytes + itemBytes > maxBytes) { truncated = true; break }
+          data.push(item)
+          bytes += itemBytes
+        }
+      } finally { await directory.close() }
       return { data, truncated }
     }
 

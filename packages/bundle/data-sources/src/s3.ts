@@ -51,7 +51,8 @@ export class S3Connector implements ReadConnector {
       const prefix = String(request.source.policy.allowedPrefix)
       const response = await this.#request(request, '', `list-type=2&prefix=${encodeURIComponent(prefix)}&max-keys=${request.request.maxRows! + 1}`)
       if (!response.ok) throw new Error(`data-sources: S3 catalog failed (${response.status})`)
-      const xml = await response.text()
+      const { bytes: xmlBytes, truncated: upstreamTruncated } = await readAtMost(response, request.request.maxBytes!)
+      const xml = new TextDecoder().decode(xmlBytes)
       const listed = [...xml.matchAll(/<Key>([^<]+)<\/Key>/g)].map(x => x[1]!)
       const keys: string[] = []; let bytes = 2; let truncated = false
       for (const key of listed) {
@@ -59,7 +60,7 @@ export class S3Connector implements ReadConnector {
         if (keys.length === request.request.maxRows! || bytes + size > request.request.maxBytes!) { truncated = true; break }
         keys.push(key); bytes += size
       }
-      return { data: { keys }, truncated: truncated || listed.length > keys.length }
+      return { data: { keys }, truncated: upstreamTruncated || truncated || listed.length > keys.length }
     }
     const response = await this.#request(request, key, '', { range: `bytes=0-${request.request.maxBytes!}` })
     if (!response.ok) throw new Error(`data-sources: S3 object read failed (${response.status})`)
