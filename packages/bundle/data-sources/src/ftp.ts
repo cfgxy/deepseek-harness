@@ -54,7 +54,10 @@ export class FtpConnector implements ReadConnector {
     const netrc = join(root, 'netrc')
     try {
       await writeFile(netrc, `machine ${netrcToken(host!)}\nlogin ${netrcToken(username)}\npassword ${netrcToken(password)}\n`, { mode: 0o600 })
-      const url = `ftp://${host}:${port}${encodePath(path).startsWith('/') ? encodePath(path) : `/${encodePath(path)}`}`
+      const encoded = encodePath(path)
+      const normalizedPath = encoded.startsWith('/') ? encoded : `/${encoded}`
+      const requestPath = lineLimit !== undefined && !normalizedPath.endsWith('/') ? `${normalizedPath}/` : normalizedPath
+      const url = `ftp://${host}:${port}${requestPath}`
       const args = ['--silent', '--show-error', '--fail', '--proto', '=ftp', '--netrc-file', netrc, '--disable']
       if (lineLimit !== undefined) args.push('--list-only')
       args.push(url)

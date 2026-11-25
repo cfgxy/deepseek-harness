@@ -727,4 +727,108 @@ describe('read-only data source supervisor', () => {
       apiVersion: 'v1', sourceId: 's3', operation: 'sql.query', input: { sql: 'SELECT 1' },
     })).rejects.toThrow('not permitted')
   })
+
+  it.each(['local-directory', 'sftp', 'smb', 'nfs', 'ftp', 'webdav'] as const)('normalizes non-root %s allowedPath trailing slashes without relaxing prefix isolation', async (kind) => {
+    for (const allowedPath of ['/files/', '/files']) {
+      const configured: SourceConfig = { ...source(kind), policy: { maxBytes: 1024, maxRows: 10, allowedPath } }
+      const supervisor = new ConnectorSupervisor([configured], [connector(kind)], { resolve: async () => ({ value: 'fixture-secret' }) })
+      await expect(supervisor.execute({ apiVersion: 'v1', sourceId: configured.id, operation: 'directory.list', input: { path: '/files' } })).resolves.toMatchObject({ data: { kind } })
+      await expect(supervisor.execute({ apiVersion: 'v1', sourceId: configured.id, operation: 'directory.list', input: { path: '/files/' } })).resolves.toMatchObject({ data: { kind } })
+      await expect(supervisor.execute({ apiVersion: 'v1', sourceId: configured.id, operation: 'object.read', input: { path: '/files/report.txt' } })).resolves.toMatchObject({ data: { kind } })
+      await expect(supervisor.execute({ apiVersion: 'v1', sourceId: configured.id, operation: 'object.read', input: { path: '/files2/report.txt' } })).rejects.toThrow('outside source')
+      await expect(supervisor.execute({ apiVersion: 'v1', sourceId: configured.id, operation: 'object.read', input: { path: '/files/../outside/secret.txt' } })).rejects.toThrow('outside source')
+    }
+  })
+
+  it('lists and reads non-root FTP subdirectories over real control and data channels regardless of trailing slash', async () => {
+    const commands: string[] = []
+    const files = new Map<string, string>([['/files/ftp-report.txt', 'ftp-subdir-payload-0123456789']])
+    const dataServers = new Set<ReturnType<typeof createServer>>()
+    const server = createServer((control) => {
+      let pending = Buffer.alloc(0); let cwd = '/'; let dataServer: ReturnType<typeof createServer> | undefined
+      let dataSocket: import('node:net').Socket | undefined; let waitingData: ((socket: import('node:net').Socket) => void) | undefined
+      const acceptData = () => dataSocket !== undefined ? Promise.resolve(dataSocket) : new Promise<import('node:net').Socket>((resolve) => { waitingData = resolve })
+      const closeData = () => { dataSocket?.destroy(); dataSocket = undefined; dataServer?.close(); dataServer = undefined }
+      control.on('error', () => {})
+      control.on('close', closeData)
+      control.write('220 test FTP server\r\n')
+      control.on('data', (chunk: Buffer) => {
+        pending = Buffer.concat([pending, chunk])
+        for (;;) {
+          const boundary = pending.indexOf('\r\n')
+          if (boundary === -1) return
+          const line = pending.subarray(0, boundary).toString('utf8')
+          pending = pending.subarray(boundary + 2)
+          commands.push(line)
+          const space = line.indexOf(' ')
+          const verb = (space === -1 ? line : line.slice(0, space)).toUpperCase()
+          const arg = space === -1 ? '' : line.slice(space + 1)
+          if (verb === 'USER') control.write('331 password required\r\n')
+          else if (verb === 'PASS') control.write('230 logged in\r\n')
+          else if (verb === 'PWD') control.write(`257 "${cwd}" is current directory\r\n`)
+          else if (verb === 'TYPE') control.write('200 Type set\r\n')
+          else if (verb === 'QUIT') { control.end('221 Bye\r\n'); closeData() }
+          else if (verb === 'CWD') {
+            const target = arg.startsWith('/') ? arg : `${cwd === '/' ? '' : cwd}/${arg}`
+            const normalized = target.replace(/\/+$/, '') || '/'
+            if (normalized === '/' || normalized === '/files') { cwd = normalized; control.write('250 Directory changed\r\n') }
+            else control.write('550 No such directory\r\n')
+          } else if (verb === 'EPSV') {
+            closeData()
+            dataServer = createServer((socket) => {
+              socket.on('error', () => {})
+              dataSocket = socket
+              if (waitingData !== undefined) { const resolve = waitingData; waitingData = undefined; resolve(socket) }
+            })
+            dataServers.add(dataServer)
+            dataServer.listen(0, '127.0.0.1', () => {
+              const address = dataServer!.address()
+              if (address === null || typeof address === 'string') return
+              control.write(`229 Entering Extended Passive Mode (|||${address.port}|)\r\n`)
+            })
+          } else if (verb === 'NLST' || verb === 'LIST') {
+            const dir = arg ? (arg.startsWith('/') ? arg : `${cwd === '/' ? '' : cwd}/${arg}`) : cwd
+            const normalized = dir.replace(/\/+$/, '') || '/'
+            const body = normalized === '/files' ? 'ftp-report.txt\r\n' : normalized === '/' ? 'files\r\n' : ''
+            void acceptData().then((socket) => {
+              control.write('150 Opening data connection\r\n')
+              socket.end(body, () => { control.write('226 Transfer complete\r\n'); closeData() })
+            })
+          } else if (verb === 'RETR') {
+            const target = arg.startsWith('/') ? arg : `${cwd === '/' ? '' : cwd}/${arg}`
+            const content = files.get(target)
+            if (content === undefined) { control.write('550 File not found\r\n'); closeData() }
+            else {
+              void acceptData().then((socket) => {
+                control.write('150 Opening data connection\r\n')
+                socket.end(content, () => { control.write('226 Transfer complete\r\n'); closeData() })
+              })
+            }
+          } else control.write('502 Unsupported\r\n')
+        }
+      })
+    })
+    const port = await listen(server)
+    try {
+      for (const allowedPath of ['/files', '/files/']) {
+        commands.length = 0
+        const ftp: SourceConfig = {
+          ...source('ftp'),
+          id: `ftp-${allowedPath === '/files' ? 'plain' : 'slash'}`,
+          connection: { host: '127.0.0.1', port, timeoutMs: 3_000 },
+          policy: { maxBytes: 1_024, maxRows: 10, allowedPath },
+        }
+        const supervisor = new ConnectorSupervisor([ftp], [new FtpConnector()], { resolve: async () => ({ value: JSON.stringify({ username: 'fixture', password: 'secret' }) }) })
+        await expect(supervisor.probe(ftp.id)).resolves.toMatchObject({ connector: 'ftp' })
+        const listed = await supervisor.listFiles(ftp.id)
+        expect(listed.objects.map(item => item.name)).toEqual(['ftp-report.txt'])
+        expect(commands.some(cmd => cmd === 'CWD files' || cmd === 'CWD /files')).toBe(true)
+        const read = await supervisor.readFile(ftp.id, listed.objects[0]!.object_id, 8)
+        expect(read).toMatchObject({ data: { bytes: 8, content: 'ftp-subd' }, truncated: true })
+      }
+    } finally {
+      for (const ds of dataServers) ds.close()
+      await new Promise<void>((resolve, reject) => server.close((error) => { if (error === undefined) resolve(); else reject(error) }))
+    }
+  }, 15_000)
 })

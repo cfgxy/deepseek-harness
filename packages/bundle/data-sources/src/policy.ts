@@ -16,11 +16,16 @@ function operationAllowed(kind: SourceConfig['kind'], operation: ReadOperation):
   return operation === 'catalog' || operation === 'object.read'
 }
 
+function stripTrailingSlash(path: string): string {
+  const trimmed = path.replace(/\/+$/, '')
+  return trimmed === '' ? '/' : trimmed
+}
+
 function allowedPath(source: SourceConfig, candidate: string): boolean {
   const root = source.policy.allowedPath
   if (root === undefined) return false
-  const normalizedRoot = posix.normalize(root)
-  const normalizedCandidate = posix.normalize(candidate)
+  const normalizedRoot = stripTrailingSlash(posix.normalize(root))
+  const normalizedCandidate = stripTrailingSlash(posix.normalize(candidate))
   if (normalizedRoot === '/') return normalizedCandidate.startsWith('/')
   return normalizedCandidate === normalizedRoot || normalizedCandidate.startsWith(`${normalizedRoot}/`)
 }
