@@ -9,6 +9,7 @@ import type {} from '@deepseek-ai/dsh-tools'
 import { LocalDirectoryConnector } from './local-directory.ts'
 import { S3Connector } from './s3.ts'
 import { SftpConnector } from './sftp.ts'
+import { MountedDirectoryConnector } from './mounted-directory.ts'
 import { MysqlConnector } from './mysql.ts'
 import { PostgreSqlConnector } from './postgresql.ts'
 import { ConnectorSupervisor } from './supervisor.ts'
@@ -36,7 +37,7 @@ export const Config: z<Config> = z.object({
   sources: z.array(z.object({
     id: z.string().required(),
     revision: z.string().required(),
-    kind: z.union(['local-directory', 's3', 'sftp', 'mysql', 'postgresql'] as const).required(),
+    kind: z.union(['local-directory', 's3', 'sftp', 'smb', 'nfs', 'ftp', 'webdav', 'mysql', 'postgresql'] as const).required(),
     label: z.string().required(),
     enabled: z.boolean().default(true),
     credentialRef: z.string(),
@@ -161,7 +162,7 @@ function applyDataSourceTools(ctx: Context, supervisor: ConnectorSupervisor): vo
 /** Install native compatibility tools and a lifecycle-owned, capability-gated Python MCP child. */
 export async function apply(ctx: Context, config: Config): Promise<void> {
   const supervisor = new ConnectorSupervisor(config.sources, [
-    new LocalDirectoryConnector(), new S3Connector(), new SftpConnector(), new MysqlConnector(), new PostgreSqlConnector(),
+    new LocalDirectoryConnector(), new S3Connector(), new SftpConnector(), new MountedDirectoryConnector('smb'), new MountedDirectoryConnector('nfs'), new MysqlConnector(), new PostgreSqlConnector(),
   ], ctx.credentials)
   new DataSourcesRemote(ctx, supervisor)
   applyDataSourceTools(ctx, supervisor)

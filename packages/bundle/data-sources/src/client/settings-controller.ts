@@ -6,7 +6,7 @@ import type { SettingsFormScope } from '@deepseek-ai/dsh-client-ui-primitives'
 /** Namespace served by the Host data-sources bundle. */
 export const DATA_SOURCES_NS = 'data-sources'
 
-export type SourceKind = 'local-directory' | 's3' | 'sftp' | 'mysql' | 'postgresql'
+export type SourceKind = 'local-directory' | 's3' | 'sftp' | 'smb' | 'nfs' | 'ftp' | 'webdav' | 'mysql' | 'postgresql'
 
 /** The only fields the browser is allowed to read or persist for one source. */
 export interface DataSourceDraft {
@@ -47,7 +47,7 @@ export interface DataSourcesCardFace {
   test: (sourceId: string) => void
 }
 
-const kinds: readonly SourceKind[] = ['local-directory', 's3', 'sftp', 'mysql', 'postgresql']
+const kinds: readonly SourceKind[] = ['local-directory', 's3', 'sftp', 'smb', 'nfs', 'ftp', 'webdav', 'mysql', 'postgresql']
 const text = (value: unknown): string => typeof value === 'string' ? value : ''
 const integer = (value: unknown): string => typeof value === 'number' && Number.isInteger(value) ? String(value) : ''
 

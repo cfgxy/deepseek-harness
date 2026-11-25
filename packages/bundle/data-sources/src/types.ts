@@ -2,7 +2,7 @@
 import { isAbsolute } from 'node:path'
 import { isCredentialRefName } from '@deepseek-ai/dsh-credentials'
 
-export const SOURCE_KINDS = ['local-directory', 's3', 'sftp', 'mysql', 'postgresql'] as const
+export const SOURCE_KINDS = ['local-directory', 's3', 'sftp', 'smb', 'nfs', 'ftp', 'webdav', 'mysql', 'postgresql'] as const
 export type SourceKind = typeof SOURCE_KINDS[number]
 export type ReadOperation = 'catalog' | 'object.read' | 'directory.list' | 'sql.query'
 
@@ -65,7 +65,7 @@ export function assertSourceConfig(source: SourceConfig): void {
   if (source.credentialRef !== undefined && !isCredentialRefName(source.credentialRef)) throw new Error(`data-sources: source ${source.id} has an invalid credential reference`)
   if (!Number.isInteger(source.policy.maxBytes) || source.policy.maxBytes < 1) throw new Error(`data-sources: source ${source.id} maxBytes must be a positive integer`)
   if (!Number.isInteger(source.policy.maxRows) || source.policy.maxRows < 1) throw new Error(`data-sources: source ${source.id} maxRows must be a positive integer`)
-  if (source.kind === 'local-directory' && (source.policy.allowedPath === undefined || !source.policy.allowedPath.startsWith('/') || source.policy.allowedPrefix !== undefined)) throw new Error(`data-sources: source ${source.id} requires an absolute allowedPath only`)
+  if ((source.kind === 'local-directory' || source.kind === 'smb' || source.kind === 'nfs') && (source.policy.allowedPath === undefined || !source.policy.allowedPath.startsWith('/') || source.policy.allowedPrefix !== undefined)) throw new Error(`data-sources: source ${source.id} requires an absolute allowedPath only`)
   if (source.kind === 'sftp' && (source.policy.allowedPath === undefined || !source.policy.allowedPath.startsWith('/') || source.policy.allowedPrefix !== undefined || !host(source) || !source.connection?.knownHostsPath)) throw new Error(`data-sources: source ${source.id} requires host, knownHostsPath, and absolute allowedPath`)
   if (source.kind === 's3' && (source.policy.allowedPrefix === undefined || source.policy.allowedPrefix.trim() === '' || source.policy.allowedPath !== undefined || !endpoint(source) || !source.connection?.bucket)) throw new Error(`data-sources: source ${source.id} requires endpoint, bucket, and allowedPrefix only`)
   if ((source.kind === 'mysql' || source.kind === 'postgresql') && (source.policy.allowedPath !== undefined || source.policy.allowedPrefix !== undefined || !host(source) || !source.connection?.database)) throw new Error(`data-sources: source ${source.id} requires host and database without a path policy`)

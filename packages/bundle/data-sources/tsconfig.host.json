@@ -11,6 +11,7 @@
     "src/broker.ts",
     "src/local-directory.ts",
     "src/mysql.ts",
+    "src/mounted-directory.ts",
     "src/policy.ts",
     "src/postgresql.ts",
     "src/s3.ts",

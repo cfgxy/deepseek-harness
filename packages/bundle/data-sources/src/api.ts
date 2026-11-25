@@ -2,7 +2,7 @@
 export interface DataSourcesProbeResult {
   ok: boolean
   source?: { id: string; revision: string }
-  connector?: 'local-directory' | 's3' | 'sftp' | 'mysql' | 'postgresql'
+  connector?: 'local-directory' | 's3' | 'sftp' | 'smb' | 'nfs' | 'ftp' | 'webdav' | 'mysql' | 'postgresql'
   observedAt?: string
   message?: string
 }
