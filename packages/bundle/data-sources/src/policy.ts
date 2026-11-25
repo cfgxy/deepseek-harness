@@ -11,7 +11,7 @@ function stringInput(input: Record<string, unknown>, field: string): string {
 }
 
 function operationAllowed(kind: SourceConfig['kind'], operation: ReadOperation): boolean {
-  if (kind === 'local-directory' || kind === 'sftp' || kind === 'smb' || kind === 'nfs') return operation === 'directory.list' || operation === 'object.read'
+  if (kind === 'local-directory' || kind === 'sftp' || kind === 'smb' || kind === 'nfs' || kind === 'ftp' || kind === 'webdav') return operation === 'directory.list' || operation === 'object.read'
   if (kind === 'mysql' || kind === 'postgresql') return operation === 'catalog' || operation === 'sql.query'
   return operation === 'catalog' || operation === 'object.read'
 }

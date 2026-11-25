@@ -46,7 +46,7 @@ const FILE_OBJECT_CAPACITY = 4096
 function isChildName(value: string): boolean { return value === basename(value) && value !== '.' && value !== '..' && !value.includes('\0') }
 
 function fileCandidates(source: SourceConfig, data: unknown): { name: string; path: string }[] {
-  if (source.kind === 'local-directory' && Array.isArray(data)) {
+  if ((source.kind === 'local-directory' || source.kind === 'smb' || source.kind === 'nfs') && Array.isArray(data)) {
     const root = source.policy.allowedPath
     if (root === undefined) return []
     return data.flatMap((item) => {
@@ -56,7 +56,7 @@ function fileCandidates(source: SourceConfig, data: unknown): { name: string; pa
       return [{ name: value.name, path: resolve(root, value.name) }]
     })
   }
-  if (source.kind === 'sftp' && typeof data === 'object' && data !== null && Array.isArray((data as { entries?: unknown }).entries)) {
+  if ((source.kind === 'sftp' || source.kind === 'ftp' || source.kind === 'webdav') && typeof data === 'object' && data !== null && Array.isArray((data as { entries?: unknown }).entries)) {
     const root = source.policy.allowedPath
     if (root === undefined) return []
     return (data as { entries: unknown[] }).entries.flatMap((value) => {
@@ -116,7 +116,7 @@ export class ConnectorSupervisor {
     sourceId: string, query?: string,
   ): Promise<{ objects: { object_id: string; name: string }[]; truncated: boolean }> {
     const source = this.#source(sourceId)
-    if (source.kind !== 'local-directory' && source.kind !== 's3' && source.kind !== 'sftp') {
+    if (source.kind !== 'local-directory' && source.kind !== 's3' && source.kind !== 'sftp' && source.kind !== 'smb' && source.kind !== 'nfs' && source.kind !== 'ftp' && source.kind !== 'webdav') {
       throw new Error('data-sources: file source is not admitted')
     }
     if (query !== undefined && (typeof query !== 'string' || query.trim() === '' || query.length > 128)) {

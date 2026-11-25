@@ -5,7 +5,7 @@ import type { DataSourceDraft, DataSourcesCardFace, SourceKind } from './setting
 
 export type DataSourcesCardProps = PropsRuntime<'plugins.item'> & PropsLocale<'settings.dataSources'> & InjectFace<DataSourcesCardFace>
 
-const kinds: readonly SourceKind[] = ['local-directory', 's3', 'sftp', 'mysql', 'postgresql']
+const kinds: readonly SourceKind[] = ['local-directory', 's3', 'sftp', 'smb', 'nfs', 'ftp', 'webdav', 'mysql', 'postgresql']
 
 function copy(source: DataSourceDraft): DataSourceDraft { return structuredClone(source) }
 

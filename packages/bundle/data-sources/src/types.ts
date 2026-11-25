@@ -65,8 +65,21 @@ export function assertSourceConfig(source: SourceConfig): void {
   if (source.credentialRef !== undefined && !isCredentialRefName(source.credentialRef)) throw new Error(`data-sources: source ${source.id} has an invalid credential reference`)
   if (!Number.isInteger(source.policy.maxBytes) || source.policy.maxBytes < 1) throw new Error(`data-sources: source ${source.id} maxBytes must be a positive integer`)
   if (!Number.isInteger(source.policy.maxRows) || source.policy.maxRows < 1) throw new Error(`data-sources: source ${source.id} maxRows must be a positive integer`)
-  if ((source.kind === 'local-directory' || source.kind === 'smb' || source.kind === 'nfs') && (source.policy.allowedPath === undefined || !source.policy.allowedPath.startsWith('/') || source.policy.allowedPrefix !== undefined)) throw new Error(`data-sources: source ${source.id} requires an absolute allowedPath only`)
+  if ((source.kind === 'local-directory' || source.kind === 'smb' || source.kind === 'nfs' || source.kind === 'ftp' || source.kind === 'webdav') && (source.policy.allowedPath === undefined || !source.policy.allowedPath.startsWith('/') || source.policy.allowedPrefix !== undefined)) throw new Error(`data-sources: source ${source.id} requires an absolute allowedPath only`)
   if (source.kind === 'sftp' && (source.policy.allowedPath === undefined || !source.policy.allowedPath.startsWith('/') || source.policy.allowedPrefix !== undefined || !host(source) || !source.connection?.knownHostsPath)) throw new Error(`data-sources: source ${source.id} requires host, knownHostsPath, and absolute allowedPath`)
+  if (source.kind === 'ftp') {
+    const ftpHost = host(source)
+    if (!ftpHost || /\s/.test(ftpHost)) throw new Error(`data-sources: source ${source.id} requires a valid host and absolute allowedPath`)
+  }
+  if (source.kind === 'webdav') {
+    const rawEndpoint = endpoint(source)
+    if (!rawEndpoint) throw new Error(`data-sources: source ${source.id} requires endpoint and absolute allowedPath`)
+    let url: URL
+    try { url = new URL(rawEndpoint) } catch { throw new Error(`data-sources: source ${source.id} has an invalid WebDAV endpoint`) }
+    if (url.protocol !== 'https:' || url.username || url.password || url.search || url.hash) {
+      throw new Error(`data-sources: source ${source.id} has an invalid WebDAV endpoint`)
+    }
+  }
   if (source.kind === 's3' && (source.policy.allowedPrefix === undefined || source.policy.allowedPrefix.trim() === '' || source.policy.allowedPath !== undefined || !endpoint(source) || !source.connection?.bucket)) throw new Error(`data-sources: source ${source.id} requires endpoint, bucket, and allowedPrefix only`)
   if ((source.kind === 'mysql' || source.kind === 'postgresql') && (source.policy.allowedPath !== undefined || source.policy.allowedPrefix !== undefined || !host(source) || !source.connection?.database)) throw new Error(`data-sources: source ${source.id} requires host and database without a path policy`)
   if (source.connection?.port !== undefined && (!Number.isInteger(source.connection.port) || source.connection.port < 1 || source.connection.port > 65535)) {

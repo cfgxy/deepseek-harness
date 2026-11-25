@@ -21,11 +21,14 @@ import { LocalDirectoryConnector } from '../src/local-directory.ts'
 import { MysqlConnector } from '../src/mysql.ts'
 import { S3Connector } from '../src/s3.ts'
 import { SftpConnector } from '../src/sftp.ts'
+import { FtpConnector } from '../src/ftp.ts'
+import { WebDavConnector } from '../src/webdav.ts'
+import { MountedDirectoryConnector } from '../src/mounted-directory.ts'
 import { PostgreSqlConnector } from '../src/postgresql.ts'
 import { ConnectorSupervisor, type ConnectorRequest, type ReadConnector } from '../src/supervisor.ts'
 import { assertSourceConfig, type ReadOperation, type SourceConfig, type SourceKind } from '../src/types.ts'
 
-const kinds: readonly SourceKind[] = ['local-directory', 's3', 'sftp', 'mysql', 'postgresql']
+const kinds: readonly SourceKind[] = ['local-directory', 's3', 'sftp', 'smb', 'nfs', 'ftp', 'webdav', 'mysql', 'postgresql']
 const execFileAsync = promisify(execFile)
 
 function source(kind: SourceKind): SourceConfig {
@@ -33,23 +36,27 @@ function source(kind: SourceKind): SourceConfig {
     ? { endpoint: 'http://127.0.0.1:9000', bucket: 'fixture' }
     : kind === 'sftp'
       ? { host: '127.0.0.1', knownHostsPath: '/tmp/known_hosts' }
-      : kind === 'mysql' || kind === 'postgresql'
-        ? { host: '127.0.0.1', database: 'fixture' }
-        : undefined
+      : kind === 'ftp'
+        ? { host: '127.0.0.1' }
+        : kind === 'webdav'
+          ? { endpoint: 'https://127.0.0.1:9001' }
+          : kind === 'mysql' || kind === 'postgresql'
+            ? { host: '127.0.0.1', database: 'fixture' }
+            : undefined
   return {
     id: kind.replace('-', '_'),
     revision: '1',
     kind,
     label: `${kind} fixture`,
     enabled: true,
-    ...(kind === 'local-directory' ? {} : { credentialRef: 'DATA_SOURCE_TEST' }),
+    ...(kind === 'local-directory' || kind === 'smb' || kind === 'nfs' ? {} : { credentialRef: 'DATA_SOURCE_TEST' }),
     ...(connection === undefined ? {} : { connection }),
-    policy: { maxBytes: 1024, maxRows: 10, ...(kind === 's3' ? { allowedPrefix: 'reports/' } : kind === 'local-directory' || kind === 'sftp' ? { allowedPath: '/fixtures/' } : {}) },
+    policy: { maxBytes: 1024, maxRows: 10, ...(kind === 's3' ? { allowedPrefix: 'reports/' } : kind === 'local-directory' || kind === 'sftp' || kind === 'smb' || kind === 'nfs' || kind === 'ftp' || kind === 'webdav' ? { allowedPath: '/fixtures/' } : {}) },
   }
 }
 
 function request(kind: SourceKind): { operation: ReadOperation; input: Record<string, unknown> } {
-  if (kind === 'local-directory' || kind === 'sftp') return { operation: 'directory.list', input: { path: '/fixtures/' } }
+  if (kind === 'local-directory' || kind === 'sftp' || kind === 'smb' || kind === 'nfs' || kind === 'ftp' || kind === 'webdav') return { operation: 'directory.list', input: { path: '/fixtures/' } }
   if (kind === 's3') return { operation: 'object.read', input: { path: 'reports/example.csv' } }
   return { operation: 'sql.query', input: { sql: 'SELECT 1' } }
 }
@@ -261,6 +268,13 @@ describe('read-only data source supervisor', () => {
     })).toThrow('TLS is supported only for database connectors')
   })
 
+  it('rejects invalid FTP and WebDAV connection coordinates before connector dispatch', () => {
+    expect(() => { assertSourceConfig({ ...source('ftp'), connection: {}, policy: { maxBytes: 1, maxRows: 1, allowedPath: '/' } }) }).toThrow('valid host')
+    expect(() => { assertSourceConfig({ ...source('ftp'), connection: { host: 'fixture\nlogin injected' }, policy: { maxBytes: 1, maxRows: 1, allowedPath: '/' } }) }).toThrow('valid host')
+    expect(() => { assertSourceConfig({ ...source('webdav'), connection: { endpoint: 'http://example.invalid' }, policy: { maxBytes: 1, maxRows: 1, allowedPath: '/' } }) }).toThrow('invalid WebDAV endpoint')
+    expect(() => { assertSourceConfig({ ...source('webdav'), connection: { endpoint: 'https://user:secret@example.invalid' }, policy: { maxBytes: 1, maxRows: 1, allowedPath: '/' } }) }).toThrow('invalid WebDAV endpoint')
+  })
+
   it.each(kinds)('executes the %s fixture read through its matching connector', async (kind) => {
     const resolver = { resolve: vi.fn(async () => ({ value: 'fixture-secret' })) }
     const supervisor = new ConnectorSupervisor([source(kind)], [connector(kind)], resolver)
@@ -272,7 +286,7 @@ describe('read-only data source supervisor', () => {
     expect(result.source).toEqual({ id: source(kind).id, revision: '1' })
     expect(result.data).toMatchObject({
       kind,
-      credentialUsed: kind !== 'local-directory',
+      credentialUsed: !['local-directory', 'smb', 'nfs'].includes(kind),
       maxBytes: 1024,
       maxRows: 10,
     })
@@ -302,7 +316,7 @@ describe('read-only data source supervisor', () => {
     expect(execute).not.toHaveBeenCalled()
   })
 
-  it.each(['local-directory', 'sftp'] as const)('rejects %s normalized paths outside its configured root', async (kind) => {
+  it.each(['local-directory', 'sftp', 'smb', 'nfs', 'ftp', 'webdav'] as const)('rejects %s normalized paths outside its configured root', async (kind) => {
     const supervisor = new ConnectorSupervisor([source(kind)], [connector(kind)], { resolve: async () => ({ value: 'fixture-secret' }) })
     for (const path of ['/outside/', '/fixtures/../outside/']) {
       await expect(supervisor.execute({
@@ -365,6 +379,76 @@ describe('read-only data source supervisor', () => {
       await expect(brokerRequest(bootstrap.endpoint, { capability: bootstrap.capability, operation: 'slow', arguments: {} })).resolves.toBe('')
       expect(aborted).toBe(true)
     } finally { await broker.dispose() }
+  })
+
+  it.each(['smb', 'nfs'] as const)('reads only through the configured %s mount root', async (kind) => {
+    const root = await mkdtemp(join(tmpdir(), `dsh-${kind}-`))
+    const outside = await mkdtemp(join(tmpdir(), `dsh-${kind}-outside-`))
+    try {
+      await writeFile(join(root, 'report.txt'), 'mounted-content')
+      await writeFile(join(outside, 'secret.txt'), 'secret')
+      await symlink(outside, join(root, 'escape'))
+      const configured: SourceConfig = { ...source(kind), policy: { maxBytes: 1_024, maxRows: 10, allowedPath: root } }
+      const supervisor = new ConnectorSupervisor([configured], [new MountedDirectoryConnector(kind)], { resolve: async () => undefined })
+      await expect(supervisor.probe(configured.id)).resolves.toMatchObject({ connector: kind })
+      const files = await supervisor.listFiles(configured.id)
+      expect(files.objects).toHaveLength(1)
+      await expect(supervisor.readFile(configured.id, files.objects[0]!.object_id, 8)).resolves.toMatchObject({ data: { content: 'mounted-', bytes: 8 }, truncated: true })
+      await expect(supervisor.execute({ apiVersion: 'v1', sourceId: configured.id, operation: 'object.read', input: { path: join(root, 'escape', 'secret.txt') } })).rejects.toThrow('escapes')
+    } finally {
+      await rm(root, { recursive: true, force: true })
+      await rm(outside, { recursive: true, force: true })
+    }
+  })
+
+  it('stops FTP object and directory output streams at their byte or row sentinel', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'dsh-ftp-stream-'))
+    const curl = join(root, 'curl')
+    const originalPath = process.env.PATH
+    try {
+      await writeFile(curl, '#!/bin/sh\ncase " $* " in *" --list-only "*) while :; do printf "entry\\n"; done ;; *) while :; do printf x; done ;; esac\n', { mode: 0o755 })
+      process.env.PATH = `${root}:${originalPath ?? ''}`
+      const ftp: SourceConfig = { ...source('ftp'), connection: { host: 'fixture', timeoutMs: 1_000 }, policy: { maxBytes: 32, maxRows: 1, allowedPath: '/' } }
+      const credential = JSON.stringify({ username: 'fixture', password: 'fixture' })
+      await expect(new FtpConnector().execute({ source: ftp, credential, request: { apiVersion: 'v1', sourceId: ftp.id, operation: 'object.read', input: { path: '/object' }, maxBytes: 4, maxRows: 1 } }))
+        .resolves.toMatchObject({ data: { content: 'xxxx', bytes: 4 }, truncated: true })
+      await expect(new FtpConnector().execute({ source: ftp, credential, request: { apiVersion: 'v1', sourceId: ftp.id, operation: 'directory.list', input: { path: '/' }, maxBytes: 32, maxRows: 1 } }))
+        .resolves.toMatchObject({ data: { entries: ['entry'] }, truncated: true })
+    } finally {
+      process.env.PATH = originalPath
+      await rm(root, { recursive: true, force: true })
+    }
+  })
+
+  it('uses read-only authenticated WebDAV methods and caps their output', async () => {
+    let observed: { method?: string | undefined; authorization?: string | undefined; range?: string | undefined } = {}
+    const server = createHttpServer((request, response) => {
+      observed = { method: request.method, authorization: request.headers.authorization, range: request.headers.range }
+      if (request.method === 'PROPFIND') {
+        response.writeHead(207, { 'content-type': 'application/xml' })
+        response.end('<d:multistatus xmlns:d="DAV:"><d:response><d:href>/fixtures/</d:href></d:response><d:response><d:href>/fixtures/alpha.txt</d:href></d:response><d:response><d:href>/fixtures/beta.txt</d:href></d:response></d:multistatus>')
+        return
+      }
+      response.end('abcde')
+    })
+    await new Promise<void>(resolve => server.listen(0, '127.0.0.1', resolve))
+    const address = server.address()
+    if (address === null || typeof address === 'string') throw new Error('fixture server has no HTTP port')
+    try {
+      const webdav: SourceConfig = { ...source('webdav'), connection: { endpoint: `http://127.0.0.1:${address.port}`, timeoutMs: 1_000 }, policy: { maxBytes: 1_024, maxRows: 1, allowedPath: '/fixtures' } }
+      const credential = JSON.stringify({ username: 'fixture', password: 'secret' })
+      await expect(new WebDavConnector().execute({ source: webdav, credential, request: { apiVersion: 'v1', sourceId: webdav.id, operation: 'directory.list', input: { path: '/fixtures' }, maxBytes: 1_024, maxRows: 1 } }))
+        .resolves.toMatchObject({ data: { entries: ['alpha.txt'] }, truncated: true })
+      expect(observed).toMatchObject({ method: 'PROPFIND', authorization: `Basic ${Buffer.from('fixture:secret').toString('base64')}` })
+      await expect(new WebDavConnector().execute({ source: webdav, credential, request: { apiVersion: 'v1', sourceId: webdav.id, operation: 'object.read', input: { path: '/fixtures/alpha.txt' }, maxBytes: 4, maxRows: 1 } }))
+        .resolves.toMatchObject({ data: { content: 'abcd', bytes: 4 }, truncated: true })
+      expect(observed).toMatchObject({ method: 'GET', range: 'bytes=0-4' })
+    } finally {
+      await new Promise<void>((resolve, reject) => server.close((error) => {
+        if (error === undefined) resolve()
+        else reject(error)
+      }))
+    }
   })
 
   it('bounds real local reads and rejects a symlink which escapes the configured root', async () => {
@@ -448,6 +532,10 @@ describe('read-only data source supervisor', () => {
   it.each([
     { kind: 's3' as const, source: { ...source('s3'), policy: { maxBytes: 1024, maxRows: 10, allowedPrefix: 'reports/' } }, catalog: { keys: ['reports/report.txt'] }, expected: 'reports/report.txt' },
     { kind: 'sftp' as const, source: { ...source('sftp'), policy: { maxBytes: 1024, maxRows: 10, allowedPath: '/upload' } }, catalog: { entries: ['report.txt'] }, expected: '/upload/report.txt' },
+    { kind: 'smb' as const, source: { ...source('smb'), policy: { maxBytes: 1024, maxRows: 10, allowedPath: '/upload' } }, catalog: [{ name: 'report.txt', kind: 'file' }], expected: '/upload/report.txt' },
+    { kind: 'nfs' as const, source: { ...source('nfs'), policy: { maxBytes: 1024, maxRows: 10, allowedPath: '/upload' } }, catalog: [{ name: 'report.txt', kind: 'file' }], expected: '/upload/report.txt' },
+    { kind: 'ftp' as const, source: { ...source('ftp'), policy: { maxBytes: 1024, maxRows: 10, allowedPath: '/upload' } }, catalog: { entries: ['report.txt'] }, expected: '/upload/report.txt' },
+    { kind: 'webdav' as const, source: { ...source('webdav'), policy: { maxBytes: 1024, maxRows: 10, allowedPath: '/upload' } }, catalog: { entries: ['report.txt'] }, expected: '/upload/report.txt' },
   ])('normalizes listed $kind objects before a token can read them', async ({ kind, source: configured, catalog, expected }) => {
     const execute = vi.fn(async ({ request }: ConnectorRequest) => {
       if (request.operation === 'catalog' || request.operation === 'directory.list') return { data: catalog, truncated: false }
