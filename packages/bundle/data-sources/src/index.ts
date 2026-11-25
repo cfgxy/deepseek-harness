@@ -1,5 +1,5 @@
 import { fileURLToPath } from 'node:url'
-import type { Context, Fiber } from '@deepseek-ai/cordis'
+import type { Context, Fiber, Volatile } from '@deepseek-ai/cordis'
 import z from '@deepseek-ai/schemastery'
 import * as McpClient from '@deepseek-ai/dsh-mcp-client'
 import { createMcpToolDefinition } from '@deepseek-ai/dsh-mcp-client'
@@ -23,7 +23,7 @@ export const name = 'data-sources'
 export const inject = ['tools', 'credentials']
 
 export interface Config {
-  sources: SourceConfig[]
+  sources: Volatile<SourceConfig[]>
   pythonCommand?: string
 }
 
@@ -34,7 +34,7 @@ const Policy = z.object({
   allowedPrefix: z.string(),
 })
 
-export const Config: z<Config> = z.object({
+export const Config = z.object({
   pythonCommand: z.string().default('uv'),
   sources: z.array(z.object({
     id: z.string().required(),
@@ -49,7 +49,7 @@ export const Config: z<Config> = z.object({
       tls: z.object({ enabled: z.boolean(), caPath: z.string(), serverName: z.string() }),
     }).default({}),
     policy: Policy.required(),
-  })).default([]),
+  })).default([]).volatile(),
 })
 
 const requestSchema = {
@@ -119,9 +119,12 @@ declare module '@deepseek-ai/cordis' {
 
 /** Browser-safe remote surface: probes disclose no credentials, paths, or provider errors. */
 export class DataSourcesRemote extends TypertRemoteService {
-  constructor(ctx: Context, private readonly supervisor: ConnectorSupervisor) {
+  constructor(ctx: Context, private supervisor: ConnectorSupervisor) {
     super(ctx, 'dataSources')
   }
+
+  /** Replace the current configuration snapshot after a live Loader update. */
+  replaceSupervisor(supervisor: ConnectorSupervisor): void { this.supervisor = supervisor }
 
   @Remote
   async probe(request: { sourceId: string }, signal: AbortSignal): Promise<DataSourcesProbeResult> {
@@ -138,36 +141,44 @@ export class DataSourcesRemote extends TypertRemoteService {
 }
 
 /** Register native read tools through the MCP result adapter so every result has one canonical projection. */
-function applyDataSourceTools(ctx: Context, supervisor: ConnectorSupervisor): void {
+function applyDataSourceTools(ctx: Context, getSupervisor: () => ConnectorSupervisor): void {
   ctx.effect(() => ctx.tools.register(createMcpToolDefinition(ctx, {
     name: 'data_sources_list', rawName: 'data_sources_list', description: 'List configured read-only data sources without credentials.',
     inputSchema: { type: 'object', additionalProperties: false },
-    call: async () => mcpText(supervisor.list()),
+    call: async () => mcpText(getSupervisor().list()),
   })))
   ctx.effect(() => ctx.tools.register(createMcpToolDefinition(ctx, {
     name: 'data_sources_inspect', rawName: 'data_sources_inspect', description: 'Inspect a configured source policy without credentials.',
     inputSchema: { type: 'object', additionalProperties: false, required: ['sourceId'], properties: { sourceId: { type: 'string' } } },
-    call: async args => mcpText(supervisor.inspect(String(args.sourceId))),
+    call: async args => mcpText(getSupervisor().inspect(String(args.sourceId))),
   })))
   ctx.effect(() => ctx.tools.register(createMcpToolDefinition(ctx, {
     name: 'data_sources_probe', rawName: 'data_sources_probe', description: 'Test an enabled source without returning credentials or source contents.',
     inputSchema: { type: 'object', additionalProperties: false, required: ['sourceId'], properties: { sourceId: { type: 'string' } } },
-    call: async args => mcpText(await supervisor.probe(String(args.sourceId))),
+    call: async args => mcpText(await getSupervisor().probe(String(args.sourceId))),
   })))
   ctx.effect(() => ctx.tools.register(createMcpToolDefinition(ctx, {
     name: 'data_sources_read', rawName: 'data_sources_read', description: 'Perform a policy-limited read from a configured data source.',
     inputSchema: requestSchema,
-    call: async args => mcpText(await supervisor.execute({ apiVersion: 'v1', ...args } as ReadRequest)),
+    call: async args => mcpText(await getSupervisor().execute({ apiVersion: 'v1', ...args } as ReadRequest)),
   })))
 }
 
 /** Install native compatibility tools and a lifecycle-owned, capability-gated Python MCP child. */
 export async function apply(ctx: Context, config: Config): Promise<void> {
-  const supervisor = new ConnectorSupervisor(config.sources, [
+  const createSupervisor = () => new ConnectorSupervisor(config.sources.get(), [
     new LocalDirectoryConnector(), new S3Connector(), new SftpConnector(), new MountedDirectoryConnector('smb'), new MountedDirectoryConnector('nfs'), new FtpConnector(), new WebDavConnector(), new MysqlConnector(), new PostgreSqlConnector(),
   ], ctx.credentials)
-  new DataSourcesRemote(ctx, supervisor)
-  applyDataSourceTools(ctx, supervisor)
+  let supervisor = createSupervisor()
+  const remote = new DataSourcesRemote(ctx, supervisor)
+  const onVolatileUpdate = ctx.on as unknown as (event: 'loader/volatile-update', listener: () => void) => void
+  onVolatileUpdate('loader/volatile-update', () => {
+    try {
+      supervisor = createSupervisor()
+      remote.replaceSupervisor(supervisor)
+    } catch (error) { ctx.logger.warn('data-sources: rejected live source configuration update: %o', error) }
+  })
+  applyDataSourceTools(ctx, () => supervisor)
   const broker = new DataSourcesBroker((request, signal) => {
     signal.throwIfAborted()
     return admitBrokerOperation(supervisor, request)

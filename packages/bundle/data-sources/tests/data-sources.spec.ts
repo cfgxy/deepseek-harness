@@ -250,13 +250,18 @@ describe('read-only data source supervisor', () => {
     }
   }, 30_000)
 
+  it('declares source definitions as one live-editable settings field', () => {
+    expect(BundleConfig.dict?.sources?.meta.volatile).toBe(true)
+  })
+
   it('retains credentialRef when the Loader schema constructs external source configuration', () => {
     const parsed = new BundleConfig({ sources: [{
       ...source('postgresql'), credentialRef: 'DATA_SOURCE_TEST',
     }] })
-    expect(parsed.sources[0]?.credentialRef).toBe('DATA_SOURCE_TEST')
-    expect(parsed.sources[0]?.connection?.tls?.enabled).toBeUndefined()
-    expect(() => assertSourceConfig(parsed.sources[0]!)).not.toThrow()
+    const configured = parsed.sources.get()[0]
+    expect(configured?.credentialRef).toBe('DATA_SOURCE_TEST')
+    expect(configured?.connection?.tls?.enabled).toBeUndefined()
+    expect(() => assertSourceConfig(configured!)).not.toThrow()
   })
 
   it('keeps TLS opt-in and retains numeric deadline validation', () => {
