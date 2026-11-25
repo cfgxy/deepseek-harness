@@ -19,6 +19,8 @@ function credentials(value: string | undefined): { username: string; password: s
 
 function encodePath(path: string): string { return path.split('/').map(encodeURIComponent).join('/') }
 
+function netrcToken(value: string): string { return `"${value.replaceAll('\\', '\\\\').replaceAll('"', '\\"')}"` }
+
 /** Uses curl's FTP reader with a per-operation private netrc; it never uploads, deletes, or renames. */
 export class FtpConnector implements ReadConnector {
   readonly kind = 'ftp' as const
@@ -51,7 +53,7 @@ export class FtpConnector implements ReadConnector {
     const root = await mkdtemp(join(tmpdir(), 'dsh-ftp-'))
     const netrc = join(root, 'netrc')
     try {
-      await writeFile(netrc, `machine ${host}\nlogin ${username}\npassword ${password}\n`, { mode: 0o600 })
+      await writeFile(netrc, `machine ${netrcToken(host!)}\nlogin ${netrcToken(username)}\npassword ${netrcToken(password)}\n`, { mode: 0o600 })
       const url = `ftp://${host}:${port}${encodePath(path).startsWith('/') ? encodePath(path) : `/${encodePath(path)}`}`
       const args = ['--silent', '--show-error', '--fail', '--proto', '=ftp', '--netrc-file', netrc, '--disable']
       if (lineLimit !== undefined) args.push('--list-only')

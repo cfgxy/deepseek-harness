@@ -22,7 +22,7 @@ Each source has non-secret coordinates in `connection`, a credential reference i
 | `mysql` | `host`, optional `port`, `database` | `{"username":"…","password":"…"}` |
 | `postgresql` | `host`, optional `port`, `database` | `{"username":"…","password":"…"}` |
 
-SFTP uses OpenSSH with `StrictHostKeyChecking=yes` and an ephemeral key file removed after each operation. SMB and NFS only traverse an administrator-provisioned mount and never issue mount commands. FTP uses an ephemeral private netrc rather than placing a password in process arguments. WebDAV permits HTTPS `PROPFIND` and `GET` only, with platform certificate validation. S3 reads use SigV4 against path-style S3-compatible endpoints. MySQL speaks the classic protocol with `mysql_native_password`; PostgreSQL speaks protocol v3 (trust, clear-text password, and MD5 password authentication).
+SFTP uses OpenSSH with `StrictHostKeyChecking=yes` and an ephemeral key file removed after each operation. SMB and NFS only traverse an administrator-provisioned mount and never issue mount commands. FTP writes an ephemeral private netrc: every field is quoted and backslash/double-quote escaped, so usernames and passwords may contain spaces and those characters without entering process arguments. FTP rejects CR/LF in credentials because those bytes are unsafe in the FTP control protocol. WebDAV permits HTTPS `PROPFIND` and `GET` only, with platform certificate validation. S3 reads use SigV4 against path-style S3-compatible endpoints. MySQL speaks the classic protocol with `mysql_native_password`; PostgreSQL speaks protocol v3 (trust, clear-text password, and MD5 password authentication).
 
 ## Safety rules
 

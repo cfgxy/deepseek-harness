@@ -401,6 +401,51 @@ describe('read-only data source supervisor', () => {
     }
   })
 
+  it('serializes FTP credentials losslessly over the real control channel', async () => {
+    const commands: string[] = []
+    let authenticated: () => void = () => {}
+    const authentication = new Promise<void>((resolve) => { authenticated = resolve })
+    const server = createServer((socket) => {
+      let pending = Buffer.alloc(0)
+      socket.write('220 test FTP server\r\n')
+      socket.on('data', (data: Buffer) => {
+        pending = Buffer.concat([pending, data])
+        for (;;) {
+          const boundary = pending.indexOf('\r\n')
+          if (boundary === -1) return
+          const command = pending.subarray(0, boundary).toString('utf8')
+          pending = pending.subarray(boundary + 2)
+          commands.push(command)
+          if (command.startsWith('USER ')) socket.write('331 password required\r\n')
+          else if (command.startsWith('PASS ')) {
+            socket.write('230 authenticated\r\n')
+            socket.end()
+            authenticated()
+          }
+        }
+      })
+    })
+    const port = await listen(server)
+    const username = 'alice password "quoted"\\literal'
+    const password = 'actual secret "quoted"\\literal'
+    const ftp: SourceConfig = {
+      ...source('ftp'),
+      connection: { host: '127.0.0.1', port, timeoutMs: 1_000 },
+      policy: { maxBytes: 1_024, maxRows: 10, allowedPath: '/' },
+    }
+    try {
+      const supervisor = new ConnectorSupervisor(
+        [ftp], [new FtpConnector()],
+        { resolve: async () => ({ value: JSON.stringify({ username, password }) }) },
+      )
+      await expect(supervisor.probe(ftp.id)).rejects.toThrow('FTP operation failed')
+      await authentication
+      expect(commands.slice(0, 2)).toEqual([`USER ${username}`, `PASS ${password}`])
+    } finally {
+      await new Promise<void>((resolve, reject) => server.close(error => error === undefined ? resolve() : reject(error)))
+    }
+  })
+
   it('stops FTP object and directory output streams at their byte or row sentinel', async () => {
     const root = await mkdtemp(join(tmpdir(), 'dsh-ftp-stream-'))
     const curl = join(root, 'curl')
