@@ -2,7 +2,7 @@
   "name": "@ruyi/dsh-data-sources",
   "version": "0.2.2-alpha.2",
   "description": "Read-only data-source registry and MCP-backed tool bundle for DeepSeek Harness",
-  "publishConfig": { "access": "public" },
+  "private": true,
   "repository": {
     "type": "git",
     "url": "git+https://github.com/cfgxy/deepseek-harness.git",
