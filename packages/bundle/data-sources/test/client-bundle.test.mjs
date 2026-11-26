@@ -1,0 +1,115 @@
+import assert from 'node:assert/strict'
+import { readFile } from 'node:fs/promises'
+import test from 'node:test'
+import vm from 'node:vm'
+
+test('client registers a credential-safe settings page and releases every lifetime registration', async () => {
+  const source = await readFile(new URL('../lib/client.js', import.meta.url), 'utf8')
+  let registration
+  vm.runInNewContext(source, { window: { __ModuleLoader__: { load(value) { registration = value } } }, structuredClone })
+  assert.equal(registration.id, '@ruyi/dsh-data-sources')
+
+  const React = { createElement(type, props, ...children) { return { type, props, children } }, useEffect() {}, useRef(value) { return { current: value } }, useState(value) { return [value, () => {}] } }
+  const jsxRuntime = { Fragment: 'Fragment', jsx(type, props) { return { type, props } }, jsxs(type, props) { return { type, props } } }
+  const primitives = { Button() { return null }, Input() { return null } }
+  const clientStore = { createSnapshotStore(value) { let snapshot = value; return { getSnapshot() { return snapshot }, subscribe() { return () => {} }, set(next) { snapshot = next } } } }
+  const client = registration.factory((specifier) => {
+    if (specifier === 'zod') return { z: {} }
+    if (specifier === '@deepseek-ai/dsh-typert-protocol/remote-info') return { createTypertRemoteInfo(value) { return value } }
+    if (specifier === 'react') return React
+    if (specifier === 'react/jsx-runtime') return jsxRuntime
+    if (specifier === '@deepseek-ai/dsh-client-ui-primitives') return primitives
+    if (specifier === '@deepseek-ai/dsh-client-store') return clientStore
+    throw new Error(`unexpected client dependency: ${specifier}`)
+  })
+  assert.deepEqual([...client.inject], ['slots', 'locale', 'remote', 'configForms'])
+
+  let scopeDisposed = 0
+  let localeDisposed = 0
+  let slotDisposed = 0
+  const writes = []
+  const cleanups = []
+  const registrations = []
+  let revision = 1
+  const scope = {
+    getSnapshot() {
+      return {
+        status: 'ready', writable: true, revision, value: {
+          sources: [{
+            id: 'fixture', revision: '1', kind: 'mysql', label: 'Fixture DB', credentialRef: 'DB_READONLY',
+            connection: {
+              host: 'db.fixture.test', password: 'must-not-render', token: 'token-value', apiKey: 'api-key-value',
+              authorization: 'authorization-value', keyMaterial: 'key-material-value', nested: { value: 'neutral-secret-value' },
+            },
+            policy: { maxBytes: 1024, maxRows: 10 }, secret: 'must-not-render', token: 'token-value', apiKey: 'api-key-value',
+            authorization: 'authorization-value', keyMaterial: 'key-material-value', neutral: { value: 'neutral-secret-value' }, tls: { rejectUnauthorized: false },
+          }],
+        },
+      }
+    },
+    subscribe() { return () => { scopeDisposed += 1 } },
+    async mutate(ops, expectedRevision) { assert.equal(expectedRevision, revision); writes.push(ops); revision += 1; return true },
+  }
+  let remoteDisposed = 0
+  let injectedDisposed = 0
+  const remote = {
+    dataSources: { async probe() { return { ok: true, value: { ok: true } } } },
+    async $mount() { return async () => { remoteDisposed += 1 } },
+  }
+  const ctx = {
+    effect(callback) { cleanups.push(callback()) },
+    inject(_deps, callback) {
+      callback({ ...ctx, effect(effect) { cleanups.push(effect()) } })
+      return { async dispose() { injectedDisposed += 1 } }
+    },
+    locale: { register() { return () => { localeDisposed += 1 } }, bind() { return key => key } },
+    remote,
+    configForms: { get() { return scope }, whileServed(_names, register) { return register() } },
+    slots: {
+      inject(_name, callback) { return callback() },
+      register(definition, component) { registrations.push({ definition, component }); return () => { slotDisposed += 1 } },
+    },
+  }
+  const dispose = await client.apply(ctx)
+  const page = registrations.find(entry => entry.definition.name === 'plugins.item')
+  assert.notEqual(page, undefined)
+  const face = page.definition.inject()
+  const state = face.hooks.dataSourcesSettings.getSnapshot()
+  const projection = JSON.stringify(state)
+  assert.match(projection, /DB_READONLY/)
+  for (const secret of ['must-not-render', 'token-value', 'api-key-value', 'authorization-value', 'key-material-value', 'neutral-secret-value']) {
+    assert.doesNotMatch(projection, new RegExp(secret))
+  }
+  assert.equal(typeof face.test, 'function')
+  const rendered = page.component({
+    view: 'detail', t: key => key, ...face,
+    useDataSourcesSettings(select) { return select(state) },
+  })
+  // Collapsed cards intentionally keep configuration details out of the list;
+  // the credential reference remains available only in the safe controller projection.
+  assert.doesNotMatch(JSON.stringify(rendered), /must-not-render/)
+  for (const secret of ['must-not-render', 'token-value', 'api-key-value', 'authorization-value', 'key-material-value', 'neutral-secret-value']) {
+    assert.doesNotMatch(JSON.stringify(rendered), new RegExp(secret))
+  }
+  assert.equal(await face.save({ ...state.sources[0], label: 'Renamed fixture' }, state.scopeRevision), 'saved')
+  const writesBeforeConflict = writes.length
+  revision += 1
+  assert.equal(await face.save({ ...state.sources[0], label: 'Stale fixture' }, state.scopeRevision), 'conflict')
+  assert.equal(writes.length, writesBeforeConflict)
+  const saved = JSON.stringify(writes)
+  assert.doesNotMatch(saved, /rejectUnauthorized/)
+  for (const secret of ['must-not-render', 'token-value', 'api-key-value', 'authorization-value', 'key-material-value', 'neutral-secret-value']) {
+    assert.doesNotMatch(saved, new RegExp(secret))
+  }
+  face.test('fixture')
+  await new Promise(resolve => setImmediate(resolve))
+  assert.match(face.hooks.dataSourcesSettings.getSnapshot().probes.fixture.message, /succeeded/)
+
+  await dispose()
+  for (const cleanup of cleanups.reverse()) cleanup?.()
+  assert.equal(remoteDisposed, 1)
+  assert.equal(injectedDisposed, 1)
+  assert.equal(scopeDisposed, 1)
+  assert.equal(localeDisposed, 1)
+  assert.equal(slotDisposed, 1)
+})

@@ -325,6 +325,11 @@ export function mountAssembledApp(options: AssembledBootOptions = {}): Assembled
   return remote
 }
 
+export async function unmountAssembledApp(): Promise<void> {
+  await unmount?.()
+  unmount = undefined
+}
+
 /**
  * Create a fixture Session through the sidebar and wait for its own composer to mount.
  * @param remote - fixture transport returned by mountAssembledApp.
