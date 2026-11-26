@@ -6,3 +6,18 @@ export interface DataSourcesProbeResult {
   observedAt?: string
   message?: string
 }
+
+/** Browser-safe report on Python and uv environment status. */
+export interface DataSourcesEnvStatus {
+  hasPython: boolean
+  hasUv: boolean
+  mcpRunning: boolean
+  uvPath?: string | undefined
+  message?: string | undefined
+}
+
+/** Result of one-click environment installation or reload. */
+export interface DataSourcesInstallResult {
+  ok: boolean
+  message: string
+}

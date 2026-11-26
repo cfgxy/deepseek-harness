@@ -7,6 +7,7 @@ export type DataSourcesLocaleKey =
   | 'confirmRemove' | 'continueEditing' | 'discardChanges' | 'discardTitle' | 'discardDescription' | 'loadFailed' | 'readOnly'
   | 'typeRequired' | 'sourceType' | 'selectType' | 'localGroup' | 'objectGroup' | 'remoteGroup' | 'databaseGroup' | 'ftpWarning'
   | 'mountedHint' | 'databaseHint' | 'validationFailed' | 'saveFailed' | 'saveConflict' | 'updating' | 'probeIdle'
+  | 'envBannerTitle' | 'envBannerDesc' | 'envMissingTag' | 'envUvFound' | 'installEnv' | 'installingEnv' | 'envReady' | 'reloadMcp' | 'reloadingMcp'
 
 export const en: Record<DataSourcesLocaleKey, string> = {
   title: 'Data sources', description: 'Reads only from the scope you specify. Source data is never changed.',
@@ -17,6 +18,8 @@ export const en: Record<DataSourcesLocaleKey, string> = {
   save: 'Save changes', saving: 'Saving…', saved: 'Changes saved.', test: 'Test connection', testing: 'Testing connection…', testSuccess: 'Connection succeeded.', testFailed: 'Connection test failed. Check the connection settings and the credential reference on the host.', testDisabledDirty: 'Save your changes first.', testDisabledSource: 'Enable this source first.', cancel: 'Cancel', discard: 'Discard changes', unsaved: 'Unsaved changes',
   advanced: 'Advanced settings', tls: 'TLS', tlsEnabled: 'Enable TLS', tlsCaPath: 'CA certificate path', tlsServerName: 'TLS server name', remove: 'Remove source', removeTitle: 'Remove data source?', removeDescription: 'Your assistant will no longer be able to read this source. Source data will not be deleted.', close: 'Close', confirmRemove: 'Remove source', continueEditing: 'Keep editing', discardChanges: 'Discard changes', discardTitle: 'Discard unsaved changes?', discardDescription: 'Your unsaved changes will be lost.', loadFailed: 'Data sources could not be loaded.', readOnly: 'You can view, but cannot change these settings.',
   typeRequired: 'Select a source type.', sourceType: 'Source type', selectType: 'Select a type', localGroup: 'Local & mounted folders', objectGroup: 'Object storage', remoteGroup: 'Remote files', databaseGroup: 'Read-only databases', ftpWarning: 'FTP is unencrypted. Prefer SFTP when possible.', mountedHint: 'Mount the share on the host before entering its path.', databaseHint: 'Use a database account with read-only permissions.', validationFailed: 'Review the highlighted fields.', saveFailed: 'Couldn’t save. Your changes were kept.', saveConflict: 'This source changed in another window. Your changes were kept; reload the latest settings before saving.', updating: 'Updating…', probeIdle: 'Not tested',
+  envBannerTitle: 'Python / uv Environment', envBannerDesc: 'Optional Python & uv environment for advanced database queries and MCP bridge tools. Can be installed automatically using domestic mirrors.',
+  envMissingTag: 'Not Ready', envUvFound: 'uv Detected', installEnv: 'Install Python / uv', installingEnv: 'Installing from China mirrors…', envReady: 'Python / uv & MCP ready', reloadMcp: 'Reload MCP', reloadingMcp: 'Reloading…',
 }
 
 export const zh: Record<DataSourcesLocaleKey, string> = {
@@ -28,4 +31,6 @@ export const zh: Record<DataSourcesLocaleKey, string> = {
   save: '保存更改', saving: '保存中…', saved: '更改已保存。', test: '测试连接', testing: '正在测试连接…', testSuccess: '连接成功。', testFailed: '连接测试失败。请检查连接配置和宿主机上的凭据引用。', testDisabledDirty: '请先保存更改。', testDisabledSource: '请先启用数据源。', cancel: '取消', discard: '放弃更改', unsaved: '未保存的更改',
   advanced: '高级设置', tls: 'TLS', tlsEnabled: '启用 TLS', tlsCaPath: 'CA 证书路径', tlsServerName: 'TLS 服务器名称', remove: '移除数据源', removeTitle: '移除数据源？', removeDescription: '助手将无法再读取此来源；源数据不会删除。', close: '关闭', confirmRemove: '移除数据源', continueEditing: '继续编辑', discardChanges: '放弃更改', discardTitle: '放弃未保存的更改？', discardDescription: '未保存的更改将会丢失。', loadFailed: '暂时无法加载数据源。', readOnly: '你可以查看，但不能修改这些设置。',
   typeRequired: '请选择数据源类型。', sourceType: '数据源类型', selectType: '选择类型', localGroup: '本地与挂载目录', objectGroup: '对象存储', remoteGroup: '远程文件', databaseGroup: '只读数据库', ftpWarning: 'FTP 不加密；优先使用 SFTP。', mountedHint: '先在宿主机挂载，再填写挂载路径。', databaseHint: '请使用仅有读取权限的数据库账号。', validationFailed: '请检查标记的字段。', saveFailed: '未能保存，已保留更改。', saveConflict: '此数据源已在另一窗口更改。已保留你的更改；请重新加载最新设置后再保存。', updating: '更新中…', probeIdle: '尚未测试',
+  envBannerTitle: 'Python / uv 运行环境', envBannerDesc: '只读数据源的高级查询（如数据库与 MCP 服务）需要 Python 与 uv 支持。可从国内镜像源快速一键安装与配置。',
+  envMissingTag: '未就绪', envUvFound: '已检测到 uv', installEnv: '一键安装 Python / uv', installingEnv: '正在从国内镜像源安装…', envReady: 'Python / uv 环境与 MCP 服务已就绪', reloadMcp: '重新加载 MCP', reloadingMcp: '正在重新加载…',
 }
