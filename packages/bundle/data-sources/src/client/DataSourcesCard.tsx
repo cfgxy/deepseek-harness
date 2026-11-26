@@ -1,4 +1,4 @@
-/* oxlint-disable @stylistic/max-len, @stylistic/member-delimiter-style -- dense JSX keeps each field's allowlisted write adjacent to its control. */
+/* oxlint-disable @stylistic/max-len, @stylistic/member-delimiter-style, typescript/no-confusing-void-expression -- dense JSX keeps each field's allowlisted write adjacent to its control. */
 import { useEffect, useMemo, useState } from 'react'
 import type { ReactElement } from 'react'
 import { Button, Modal, StateDot, Switch, Tag } from '@deepseek-ai/dsh-client-ui-primitives'
@@ -18,6 +18,11 @@ function probeState(phase: 'idle' | 'pending' | 'success' | 'error'): 'idle' | '
   return states[phase]
 }
 
+type PendingAction =
+  | { readonly type: 'open'; readonly source: DataSourceDraft }
+  | { readonly type: 'add' }
+  | { readonly type: 'kind'; readonly kind: DraftKind }
+
 /** Render one configured source without ever placing a credential value in the DOM. */
 export function DataSourcesCard(props: DataSourcesCardProps) {
   const state = props.useDataSourcesSettings(snapshot => snapshot)
@@ -28,6 +33,7 @@ export function DataSourcesCard(props: DataSourcesCardProps) {
   const [error, setError] = useState<string | undefined>()
   const [notice, setNotice] = useState<string | undefined>()
   const [confirm, setConfirm] = useState<'discard' | 'remove' | undefined>()
+  const [pendingAction, setPendingAction] = useState<PendingAction | undefined>()
   const [advanced, setAdvanced] = useState(false)
 
   useEffect(() => {
@@ -46,31 +52,46 @@ export function DataSourcesCard(props: DataSourcesCardProps) {
   const validation = draft === undefined ? undefined : validateDraft(draft)
   const currentProbe = draft === undefined || dirty || isNew ? undefined : state.probes[draft.id]
 
-  const open = (source: DataSourceDraft): void => { setSelectedId(source.id) }
-  const add = (): void => {
-    const next = props.create()
-    setSelectedId(undefined)
-    setDraft(next)
-    setBaseline(copy(next))
-    setError(undefined)
-    setNotice(undefined)
-    setAdvanced(false)
+  const replaceKind = (source: DataSourceDraft, kind: DraftKind): DataSourceDraft => ({
+    ...source,
+    kind,
+    credentialRef: '',
+    connection: { ...source.connection, endpoint: '', bucket: '', region: '', host: '', port: kind === '' ? '' : defaultPort(kind), database: '', knownHostsPath: '', timeoutMs: '10000', statementTimeoutMs: '', tlsEnabled: false, tlsCaPath: '', tlsServerName: '' },
+    policy: { ...source.policy, allowedPath: '', allowedPrefix: '' },
+  })
+  const execute = (action: PendingAction): void => {
+    if (action.type === 'open') { setSelectedId(action.source.id); return }
+    if (action.type === 'add') {
+      const next = props.create()
+      setSelectedId(undefined)
+      setDraft(next)
+      setBaseline(copy(next))
+      setError(undefined)
+      setNotice(undefined)
+      setAdvanced(false)
+      return
+    }
+    if (draft !== undefined) setDraft(replaceKind(draft, action.kind))
   }
+  const request = (action: PendingAction): void => {
+    if (dirty) { setPendingAction(action); setConfirm('discard'); return }
+    execute(action)
+  }
+  const open = (source: DataSourceDraft): void => {
+    if (source.id !== selectedId) request({ type: 'open', source })
+  }
+  const add = (): void => { request({ type: 'add' }) }
   const update = (recipe: (source: DataSourceDraft) => DataSourceDraft): void => {
     if (draft === undefined) return
     setDraft(recipe(draft))
     setError(undefined)
     setNotice(undefined)
   }
-  const changeKind = (kind: DraftKind): void => update(source => ({
-    ...source,
-    kind,
-    credentialRef: '',
-    connection: { ...source.connection, endpoint: '', bucket: '', region: '', host: '', port: kind === '' ? '' : defaultPort(kind), database: '', knownHostsPath: '', timeoutMs: '10000', statementTimeoutMs: '', tlsEnabled: false, tlsCaPath: '', tlsServerName: '' },
-    policy: { ...source.policy, allowedPath: '', allowedPrefix: '' },
-  }))
+  const changeKind = (kind: DraftKind): void => {
+    if (draft !== undefined && kind !== draft.kind) request({ type: 'kind', kind })
+  }
   const close = (): void => {
-    if (dirty) { setConfirm('discard'); return }
+    if (dirty) { setPendingAction(undefined); setConfirm('discard'); return }
     setSelectedId(undefined); setDraft(undefined); setBaseline(undefined); setError(undefined); setNotice(undefined)
   }
   const save = (): void => {
@@ -138,7 +159,7 @@ export function DataSourcesCard(props: DataSourcesCardProps) {
       })}
       {draft !== undefined && isNew ? <article className={styles.card} role="listitem"><Editor id="data-source-editor-new" isNew {...{ draft, disabled, dirty, error, notice, validation, currentProbe, advanced, input, connection, update, changeKind, setAdvanced, save, close, remove, setConfirm, props }} /></article> : null}
     </div>
-    <Modal open={confirm === 'discard'} title={props.t('discardTitle')} description={props.t('discardDescription')} closeLabel={props.t('close')} onClose={() => setConfirm(undefined)} footer={<><Button data-modal-autofocus variant="outline" onClick={() => setConfirm(undefined)}>{props.t('continueEditing')}</Button><Button variant="primary" onClick={() => { setConfirm(undefined); setSelectedId(undefined); setDraft(undefined); setBaseline(undefined) }}>{props.t('discardChanges')}</Button></>} />
+    <Modal open={confirm === 'discard'} title={props.t('discardTitle')} description={props.t('discardDescription')} closeLabel={props.t('close')} onClose={() => { setConfirm(undefined); setPendingAction(undefined) }} footer={<><Button data-modal-autofocus variant="outline" onClick={() => { setConfirm(undefined); setPendingAction(undefined) }}>{props.t('continueEditing')}</Button><Button variant="primary" onClick={() => { const action = pendingAction; setConfirm(undefined); setPendingAction(undefined); if (action !== undefined) execute(action); else { setSelectedId(undefined); setDraft(undefined); setBaseline(undefined); setError(undefined); setNotice(undefined) } }}>{props.t('discardChanges')}</Button></>} />
     <Modal open={confirm === 'remove'} title={props.t('removeTitle')} description={props.t('removeDescription')} closeLabel={props.t('close')} onClose={() => setConfirm(undefined)} footer={<><Button data-modal-autofocus variant="outline" onClick={() => setConfirm(undefined)}>{props.t('cancel')}</Button><Button variant="primary" onClick={remove}>{props.t('confirmRemove')}</Button></>} />
   </section>
 }

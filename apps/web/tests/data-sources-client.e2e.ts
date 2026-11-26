@@ -103,6 +103,62 @@ it('probes only a saved source id and renders a safe result', async () => {
   await unmountAssembledApp()
 })
 
+it('requires confirmation before replacing a dirty source editor', async () => {
+  mountAssembledApp({ additionalPlugins: [dataSourcesPlugin()], remote: { dataSources: { sources: [
+    { id: 'analytics', revision: '1', kind: 'postgresql', label: 'Analytics', enabled: true, credentialRef: 'DB_READONLY', connection: { host: 'analytics.example.test', database: 'analytics' }, policy: { maxBytes: 65536, maxRows: 100 } },
+    { id: 'archive', revision: '1', kind: 'mysql', label: 'Archive', enabled: true, credentialRef: 'ARCHIVE_READONLY', connection: { host: 'archive.example.test', database: 'archive' }, policy: { maxBytes: 65536, maxRows: 100 } },
+  ] } } })
+  await openDataSourcesSettings()
+  fireEvent.click(screen.getByRole('button', { name: /Analytics/ }))
+  fireEvent.change(input('label'), { target: { value: 'Unsaved analytics' } })
+  fireEvent.click(screen.getByRole('button', { name: /Archive/ }))
+  expect(screen.getByText('Discard unsaved changes?')).not.toBeNull()
+  fireEvent.click(screen.getByRole('button', { name: 'Keep editing' }))
+  expect(input('label').value).toBe('Unsaved analytics')
+  expect(select('kind').value).toBe('postgresql')
+  fireEvent.click(screen.getByRole('button', { name: /Archive/ }))
+  fireEvent.click(screen.getByRole('button', { name: 'Discard changes' }))
+  await waitFor(() => { expect(input('label').value).toBe('Archive') })
+  expect(select('kind').value).toBe('mysql')
+  await unmountAssembledApp()
+})
+
+it('requires confirmation before adding over a dirty draft', async () => {
+  mountAssembledApp({ additionalPlugins: [dataSourcesPlugin()], remote: { dataSources: { sources: [{
+    id: 'analytics', revision: '1', kind: 'postgresql', label: 'Analytics', enabled: true, credentialRef: 'DB_READONLY', connection: { host: 'analytics.example.test', database: 'analytics' }, policy: { maxBytes: 65536, maxRows: 100 },
+  }] } } })
+  await openDataSourcesSettings()
+  fireEvent.click(screen.getByRole('button', { name: /Analytics/ }))
+  fireEvent.change(input('label'), { target: { value: 'Unsaved analytics' } })
+  fireEvent.click(screen.getByRole('button', { name: 'Add source' }))
+  expect(screen.getByText('Discard unsaved changes?')).not.toBeNull()
+  fireEvent.click(screen.getByRole('button', { name: 'Keep editing' }))
+  expect(input('label').value).toBe('Unsaved analytics')
+  fireEvent.click(screen.getByRole('button', { name: 'Add source' }))
+  fireEvent.click(screen.getByRole('button', { name: 'Discard changes' }))
+  await waitFor(() => { expect(select('kind').value).toBe('') })
+  await unmountAssembledApp()
+})
+
+it('requires confirmation before changing the type of a dirty draft', async () => {
+  mountAssembledApp({ additionalPlugins: [dataSourcesPlugin()], remote: { dataSources: {} } })
+  await openDataSourcesSettings()
+  fireEvent.click(screen.getByRole('button', { name: 'Add source' }))
+  fireEvent.change(select('kind'), { target: { value: 'postgresql' } })
+  fireEvent.change(input('label'), { target: { value: 'Unsaved database' } })
+  fireEvent.change(input('host'), { target: { value: 'db.example.test' } })
+  fireEvent.change(select('kind'), { target: { value: 'sftp' } })
+  expect(screen.getByText('Discard unsaved changes?')).not.toBeNull()
+  fireEvent.click(screen.getByRole('button', { name: 'Keep editing' }))
+  expect(select('kind').value).toBe('postgresql')
+  expect(input('host').value).toBe('db.example.test')
+  fireEvent.change(select('kind'), { target: { value: 'sftp' } })
+  fireEvent.click(screen.getByRole('button', { name: 'Discard changes' }))
+  await waitFor(() => { expect(select('kind').value).toBe('sftp') })
+  expect(input('host').value).toBe('')
+  await unmountAssembledApp()
+})
+
 it('does not offer writes to a read-only settings document', async () => {
   const remote = mountAssembledApp({ additionalPlugins: [dataSourcesPlugin()], remote: { dataSources: { writable: false } } })
   await openDataSourcesSettings()
