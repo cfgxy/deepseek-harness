@@ -3,7 +3,7 @@ description: "Install a persistent declarative enterprise capability ZIP runtime
 kind: "package-reference"
 ---
 
-# @deepseek-ai/dsh-experimental-enterprise-runtime
+# @ruyi/dsh-experimental-enterprise-runtime
 
 ## Summary
 

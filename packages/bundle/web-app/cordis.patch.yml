@@ -236,7 +236,7 @@
 
     # Built-in declarative enterprise capability ZIP runtime
     - id: enterprise-runtime
-      name: '@deepseek-ai/dsh-experimental-enterprise-runtime'
+      name: '@ruyi/dsh-experimental-enterprise-runtime'
       config:
         storageDir: .enterprise-runtime
 
