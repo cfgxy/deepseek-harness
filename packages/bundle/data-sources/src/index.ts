@@ -16,7 +16,8 @@ import { MysqlConnector } from './mysql.ts'
 import { PostgreSqlConnector } from './postgresql.ts'
 import { ConnectorSupervisor } from './supervisor.ts'
 import { DataSourcesBroker, type BrokerBootstrap, type BrokerRequest } from './broker.ts'
-import type { DataSourcesProbeResult } from './api.ts'
+import type { DataSourcesEnvStatus, DataSourcesInstallResult, DataSourcesProbeResult } from './api.ts'
+import { checkEnvironment, installEnvironment, resolveUvPath } from './env-installer.ts'
 import type { ReadRequest, SourceConfig } from './types.ts'
 
 export const name = 'data-sources'
@@ -117,9 +118,19 @@ declare module '@deepseek-ai/cordis' {
   interface Context { dataSources: DataSourcesRemote }
 }
 
+export interface DataSourcesEnvDelegate {
+  checkEnvironment: (signal: AbortSignal) => Promise<DataSourcesEnvStatus>
+  installEnvironment: (signal: AbortSignal) => Promise<DataSourcesInstallResult>
+  reloadMcp: (signal: AbortSignal) => Promise<DataSourcesInstallResult>
+}
+
 /** Browser-safe remote surface: probes disclose no credentials, paths, or provider errors. */
 export class DataSourcesRemote extends TypertRemoteService {
-  constructor(ctx: Context, private supervisor: ConnectorSupervisor) {
+  constructor(
+    ctx: Context,
+    private supervisor: ConnectorSupervisor,
+    private envDelegate?: DataSourcesEnvDelegate,
+  ) {
     super(ctx, 'dataSources')
   }
 
@@ -137,6 +148,27 @@ export class DataSourcesRemote extends TypertRemoteService {
     } catch {
       return { ok: false, message: 'Connection test failed.' }
     }
+  }
+
+  @Remote
+  async checkEnvironment(signal: AbortSignal): Promise<DataSourcesEnvStatus> {
+    signal.throwIfAborted()
+    if (!this.envDelegate) return { hasPython: false, hasUv: false, mcpRunning: false }
+    return await this.envDelegate.checkEnvironment(signal)
+  }
+
+  @Remote
+  async installEnvironment(signal: AbortSignal): Promise<DataSourcesInstallResult> {
+    signal.throwIfAborted()
+    if (!this.envDelegate) return { ok: false, message: '环境管理服务未就绪' }
+    return await this.envDelegate.installEnvironment(signal)
+  }
+
+  @Remote
+  async reloadMcp(signal: AbortSignal): Promise<DataSourcesInstallResult> {
+    signal.throwIfAborted()
+    if (!this.envDelegate) return { ok: false, message: '环境管理服务未就绪' }
+    return await this.envDelegate.reloadMcp(signal)
   }
 }
 
@@ -170,7 +202,69 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
     new LocalDirectoryConnector(), new S3Connector(), new SftpConnector(), new MountedDirectoryConnector('smb'), new MountedDirectoryConnector('nfs'), new FtpConnector(), new WebDavConnector(), new MysqlConnector(), new PostgreSqlConnector(),
   ], ctx.credentials)
   let supervisor = createSupervisor()
-  const remote = new DataSourcesRemote(ctx, supervisor)
+  const cwd = fileURLToPath(new URL('../python', import.meta.url))
+  const broker = new DataSourcesBroker((request, signal) => {
+    signal.throwIfAborted()
+    return admitBrokerOperation(supervisor, request)
+  })
+  const bootstrap = await broker.start()
+  let child: Fiber | undefined
+  let mcpRunning = false
+
+  async function restartMcp(explicitUv?: string): Promise<boolean> {
+    if (ctx.fiber.uid === null) return false
+    if (child) {
+      try { await child.dispose() } catch {}
+      child = undefined
+    }
+    if (ctx.fiber.uid === null) return false
+    const uvCommand = explicitUv ?? (await resolveUvPath(cwd, config.pythonCommand)) ?? config.pythonCommand ?? 'uv'
+    if (ctx.fiber.uid === null) return false
+    child = ctx.plugin(McpClient, McpClient.Config({
+      transport: 'stdio', serverName: 'data-sources-python', command: uvCommand,
+      args: ['run', '--frozen', 'dsh-data-sources-mcp'], cwd, env: pythonEnvironment(bootstrap),
+      failOnStartupError: false, reconnect: { enabled: false },
+    }))
+    try {
+      await child.await()
+      mcpRunning = true
+      return true
+    } catch (error) {
+      mcpRunning = false
+      ctx.logger.warn('data-sources: optional python MCP bridge is unavailable (%s); native data source tools remain active', error instanceof Error ? error.message : String(error))
+      return false
+    }
+  }
+
+  const envDelegate: DataSourcesEnvDelegate = {
+    checkEnvironment: async () => {
+      const status = await checkEnvironment(cwd, config.pythonCommand)
+      return { ...status, mcpRunning: mcpRunning || status.mcpRunning }
+    },
+    installEnvironment: async (signal) => {
+      const res = await installEnvironment(cwd, signal)
+      if (res.ok) {
+        const uvPath = await resolveUvPath(cwd)
+        const started = await restartMcp(uvPath)
+        return {
+          ok: true,
+          message: started
+            ? 'Python / uv 环境与 MCP 依赖已成功安装并启动！'
+            : '依赖已安装完成，建议重新加载以启动 MCP 服务。',
+        }
+      }
+      return res
+    },
+    reloadMcp: async () => {
+      const started = await restartMcp()
+      return {
+        ok: started,
+        message: started ? 'MCP 服务已重新加载并正常运行。' : 'MCP 服务启动失败，请检查环境或重试一键安装。',
+      }
+    },
+  }
+
+  const remote = new DataSourcesRemote(ctx, supervisor, envDelegate)
   const onVolatileUpdate = ctx.on as unknown as (event: 'loader/volatile-update', listener: () => void) => void
   onVolatileUpdate('loader/volatile-update', () => {
     try {
@@ -179,24 +273,23 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
     } catch (error) { ctx.logger.warn('data-sources: rejected live source configuration update: %o', error) }
   })
   applyDataSourceTools(ctx, () => supervisor)
-  const broker = new DataSourcesBroker((request, signal) => {
-    signal.throwIfAborted()
-    return admitBrokerOperation(supervisor, request)
-  })
-  const bootstrap = await broker.start()
-  const cwd = fileURLToPath(new URL('../python', import.meta.url))
-  let child!: Fiber
+
   ctx.effect(function* () {
     child = ctx.plugin(McpClient, McpClient.Config({
       transport: 'stdio', serverName: 'data-sources-python', command: config.pythonCommand ?? 'uv',
       args: ['run', '--frozen', 'dsh-data-sources-mcp'], cwd, env: pythonEnvironment(bootstrap),
       failOnStartupError: false, reconnect: { enabled: false },
     }))
-    yield async () => { await child.dispose(); await broker.dispose() }
+    yield async () => {
+      if (child) await child.dispose()
+      await broker.dispose()
+    }
   }, 'data-sources.python-mcp')
   try {
-    await child.await()
+    await child?.await()
+    mcpRunning = true
   } catch (error) {
+    mcpRunning = false
     ctx.logger.warn('data-sources: optional python MCP bridge is unavailable (%s); native data source tools remain active', error instanceof Error ? error.message : String(error))
   }
 }

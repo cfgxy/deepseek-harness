@@ -1,4 +1,4 @@
-/* oxlint-disable @stylistic/max-len, @stylistic/member-delimiter-style, typescript/no-confusing-void-expression -- dense JSX keeps each field's allowlisted write adjacent to its control. */
+/* oxlint-disable @stylistic/max-len, @stylistic/member-delimiter-style -- dense JSX keeps each field's allowlisted write adjacent to its control. */
 import { useEffect, useMemo, useRef, useState } from 'react'
 import type { ReactElement } from 'react'
 import { Button, Modal, StateDot, Switch, Tag } from '@deepseek-ai/dsh-client-ui-primitives'
@@ -189,6 +189,46 @@ export function DataSourcesCard(props: DataSourcesCardProps) {
     </header>
     {!state.available ? <p className={styles.error} role="alert">{props.t('loadFailed')}</p> : null}
     {!state.writable && state.available ? <p className={styles.notice}>{props.t('readOnly')}</p> : null}
+    {state.envStatus && !state.envStatus.mcpRunning ? (
+      <div className={styles.envBanner} role="region" aria-label={props.t('envBannerTitle')}>
+        <div className={styles.envBannerHead}>
+          <div className={styles.envBannerTitle}>
+            <Tag tone={state.envStatus.hasUv ? 'neutral' : 'warning'}>
+              {state.envStatus.hasUv ? props.t('envUvFound') : props.t('envMissingTag')}
+            </Tag>
+            <strong>{props.t('envBannerTitle')}</strong>
+          </div>
+          <div className={styles.envBannerActions}>
+            <Button
+              variant="primary"
+              disabled={state.envStatus.installing}
+              onClick={() => { props.installEnvironment() }}
+            >
+              {state.envStatus.installing ? props.t('installingEnv') : props.t('installEnv')}
+            </Button>
+            <Button
+              variant="outline"
+              disabled={state.envStatus.reloading || state.envStatus.installing}
+              onClick={() => { props.reloadMcp() }}
+            >
+              {state.envStatus.reloading ? props.t('reloadingMcp') : props.t('reloadMcp')}
+            </Button>
+          </div>
+        </div>
+        <p className={styles.hint}>{props.t('envBannerDesc')}</p>
+        {state.envStatus.message ? (
+          <p className={styles.success}><StateDot state="done" />{state.envStatus.message}</p>
+        ) : null}
+        {state.envStatus.error ? (
+          <p className={styles.error} role="alert">{state.envStatus.error}</p>
+        ) : null}
+      </div>
+    ) : null}
+    {state.envStatus && state.envStatus.mcpRunning && state.envStatus.message ? (
+      <div className={styles.envBanner} role="region" aria-label={props.t('envBannerTitle')}>
+        <p className={styles.success}><StateDot state="done" />{state.envStatus.message}</p>
+      </div>
+    ) : null}
     {state.sources.length === 0 && draft === undefined && state.available ? <div className={styles.empty}><p>{props.t('empty')}</p><Button variant="primary" disabled={disabled} onClick={add}>{props.t('add')}</Button></div> : null}
     <div role="list" className={styles.list} aria-label={props.t('sources')}>
       {state.sources.map((source) => {

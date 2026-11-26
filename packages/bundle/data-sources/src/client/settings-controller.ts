@@ -40,6 +40,24 @@ export type ProbeState = { phase: 'idle' | 'pending' | 'success' | 'error'; mess
 
 export type SaveResult = 'saved' | 'conflict' | 'failed'
 
+export interface EnvStatusState {
+  checked: boolean
+  hasUv: boolean
+  hasPython: boolean
+  mcpRunning: boolean
+  installing: boolean
+  reloading: boolean
+  message?: string | undefined
+  error?: string | undefined
+}
+
+interface DataSourcesRemoteClient {
+  probe: (request: { sourceId: string }) => Promise<{ ok: boolean; value: { ok: boolean } }>
+  checkEnvironment?: () => Promise<{ ok: boolean; value: { hasUv: boolean; hasPython: boolean; mcpRunning: boolean } }>
+  installEnvironment?: () => Promise<{ ok: boolean; value: { ok: boolean; message: string } }>
+  reloadMcp?: () => Promise<{ ok: boolean; value: { ok: boolean; message: string } }>
+}
+
 export interface DataSourcesCardState {
   available: boolean
   writable: boolean
@@ -50,6 +68,7 @@ export interface DataSourcesCardState {
   scopeRevision: number
   sources: readonly DataSourceDraft[]
   probes: Readonly<Record<string, ProbeState>>
+  envStatus: EnvStatusState
 }
 
 export interface DataSourcesCardFace {
@@ -59,6 +78,8 @@ export interface DataSourcesCardFace {
   remove: (sourceId: string) => Promise<boolean>
   setEnabled: (sourceId: string, enabled: boolean) => Promise<boolean>
   test: (sourceId: string) => void
+  installEnvironment: () => void
+  reloadMcp: () => void
 }
 
 const kinds: readonly SourceKind[] = ['local-directory', 's3', 'sftp', 'smb', 'nfs', 'ftp', 'webdav', 'mysql', 'postgresql']
@@ -178,10 +199,19 @@ export class DataSourcesSettingsController {
   private saving = false
   private nextId = 1
   private probes: Record<string, ProbeState> = {}
+  private envStatus: EnvStatusState = {
+    checked: false,
+    hasUv: false,
+    hasPython: false,
+    mcpRunning: false,
+    installing: false,
+    reloading: false,
+  }
 
   constructor(private readonly scope: SettingsFormScope<DataSourcesSettings>, private readonly ctx: Context) {
     this.store = createSnapshotStore(this.projection())
     this.unsubscribe = scope.subscribe(() => { this.publish() })
+    void this.checkEnvironment()
   }
 
   private sources(): readonly DataSourceDraft[] {
@@ -196,7 +226,7 @@ export class DataSourcesSettingsController {
 
   private projection(): DataSourcesCardState {
     const snapshot = this.scope.getSnapshot()
-    return { available: snapshot.status === 'ready', writable: snapshot.writable, saving: this.saving, controllerId: this.controllerId, scopeRevision: snapshot.revision ?? 0, sources: this.sources(), probes: this.probes }
+    return { available: snapshot.status === 'ready', writable: snapshot.writable, saving: this.saving, controllerId: this.controllerId, scopeRevision: snapshot.revision ?? 0, sources: this.sources(), probes: this.probes, envStatus: this.envStatus }
   }
 
   private publish(): void { if (!this.disposed) this.store.set(this.projection()) }
@@ -273,6 +303,90 @@ export class DataSourcesSettingsController {
     })
   }
 
+  private get remote(): DataSourcesRemoteClient | undefined {
+    return (this.ctx.remote as unknown as { dataSources?: DataSourcesRemoteClient }).dataSources
+  }
+
+  private async checkEnvironment(): Promise<void> {
+    try {
+      const res = await this.remote?.checkEnvironment?.()
+      if (res && res.ok) {
+        this.envStatus = {
+          ...this.envStatus,
+          checked: true,
+          hasUv: res.value.hasUv,
+          hasPython: res.value.hasPython,
+          mcpRunning: res.value.mcpRunning,
+        }
+        this.publish()
+      }
+    } catch {
+      // remote check not available
+    }
+  }
+
+  private async installEnvironment(): Promise<void> {
+    if (this.envStatus.installing) return
+    this.envStatus = { ...this.envStatus, installing: true, message: undefined, error: undefined }
+    this.publish()
+    try {
+      const res = await this.remote?.installEnvironment?.()
+      if (res && res.ok && res.value.ok) {
+        this.envStatus = {
+          ...this.envStatus,
+          installing: false,
+          mcpRunning: true,
+          hasUv: true,
+          hasPython: true,
+          message: res.value.message,
+        }
+      } else {
+        this.envStatus = {
+          ...this.envStatus,
+          installing: false,
+          error: res?.value?.message ?? '安装执行失败',
+        }
+      }
+    } catch (err) {
+      this.envStatus = {
+        ...this.envStatus,
+        installing: false,
+        error: err instanceof Error ? err.message : String(err),
+      }
+    }
+    this.publish()
+  }
+
+  private async reloadMcp(): Promise<void> {
+    if (this.envStatus.reloading) return
+    this.envStatus = { ...this.envStatus, reloading: true, message: undefined, error: undefined }
+    this.publish()
+    try {
+      const res = await this.remote?.reloadMcp?.()
+      if (res && res.ok && res.value.ok) {
+        this.envStatus = {
+          ...this.envStatus,
+          reloading: false,
+          mcpRunning: true,
+          message: res.value.message,
+        }
+      } else {
+        this.envStatus = {
+          ...this.envStatus,
+          reloading: false,
+          error: res?.value?.message ?? 'MCP 重载失败',
+        }
+      }
+    } catch (err) {
+      this.envStatus = {
+        ...this.envStatus,
+        reloading: false,
+        error: err instanceof Error ? err.message : String(err),
+      }
+    }
+    this.publish()
+  }
+
   inject(): DataSourcesCardFace {
     return {
       hooks: { dataSourcesSettings: this.store },
@@ -281,6 +395,8 @@ export class DataSourcesSettingsController {
       remove: sourceId => this.remove(sourceId),
       setEnabled: (sourceId, enabled) => this.setEnabled(sourceId, enabled),
       test: (sourceId) => { this.test(sourceId) },
+      installEnvironment: () => { void this.installEnvironment() },
+      reloadMcp: () => { void this.reloadMcp() },
     }
   }
 

@@ -9,6 +9,7 @@
     "src/index.ts",
     "src/api.ts",
     "src/broker.ts",
+    "src/env-installer.ts",
     "src/ftp.ts",
     "src/local-directory.ts",
     "src/mysql.ts",

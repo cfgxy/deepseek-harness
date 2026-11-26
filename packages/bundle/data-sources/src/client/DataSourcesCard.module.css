@@ -31,6 +31,36 @@
 .notice { color: var(--dsw-alias-label-secondary); font-size: 12px; line-height: 18px; }
 
 .list { display: flex; flex-direction: column; gap: 8px; }
+.envBanner {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 14px 16px;
+  border: 0.5px solid var(--dsw-alias-settings-card-stroke);
+  border-radius: var(--dsw-radius-lg);
+  background: var(--dsw-alias-settings-card-fill);
+}
+.envBannerHead {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 12px;
+}
+.envBannerTitle {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.envBannerTitle strong {
+  font-size: 14px;
+  line-height: 20px;
+}
+.envBannerActions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
 .card,
 .empty {
   border: 0.5px solid var(--dsw-alias-settings-card-stroke);

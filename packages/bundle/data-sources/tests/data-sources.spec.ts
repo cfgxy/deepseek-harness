@@ -243,7 +243,7 @@ describe('read-only data source supervisor', () => {
     await ctx.plugin(ToolRuntime)
     await ctx.plugin(NativeToolExecutor)
     try {
-      await expect(ctx.plugin(DataSources, { pythonCommand: process.execPath, sources: [source('local-directory')] })).rejects.toThrow()
+      await ctx.plugin(DataSources, { pythonCommand: process.execPath, sources: [source('local-directory')] })
       expect(ctx.tools.get('mcp__data-sources-python__source_list')).toBeUndefined()
     } finally {
       await ctx.fiber.dispose()
