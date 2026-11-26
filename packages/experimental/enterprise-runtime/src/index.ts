@@ -21,7 +21,10 @@ export interface RuntimeManifest {
 /** Optional, independently-owned read-only data source capability. */
 export interface DataSourceApiV1 {
   readonly apiVersion: '1'
-  execute(request: Readonly<{ query: unknown; cursor?: string; limit: number }>, signal: AbortSignal): Promise<Readonly<{ rows: readonly unknown[]; nextCursor?: string }>>
+  execute(
+    request: Readonly<{ query: unknown; cursor?: string; limit: number }>,
+    signal: AbortSignal,
+  ): Promise<Readonly<{ rows: readonly unknown[]; nextCursor?: string }>>
 }
 
 /** The only template this POC accepts. */
@@ -36,6 +39,9 @@ export interface RuntimeResult {
   readonly rows?: readonly unknown[]
   readonly nextCursor?: string
 }
+
+type ToolJsonValue = null | boolean | number | string | ToolJsonValue[] | { readonly [key: string]: ToolJsonValue }
+type ToolOutput = Record<string, ToolJsonValue>
 
 interface StoredPackage { manifest: RuntimeManifest; entry: ListTemplate }
 interface Inventory { packages: Record<string, Record<string, StoredPackage>> }
@@ -125,7 +131,9 @@ export class EnterpriseRuntimeService extends Service {
       try {
         await this.save()
       } catch (error) {
+        // oxlint-disable-next-line typescript/no-dynamic-delete -- rollback removes precisely the version just staged.
         delete versions[manifest.version]
+        // oxlint-disable-next-line typescript/no-dynamic-delete -- a failed first install has no package to retain.
         if (existing === undefined) delete this.inventory.packages[manifest.id]
         await rm(destination, { recursive: true, force: true })
         throw error
@@ -142,8 +150,8 @@ export class EnterpriseRuntimeService extends Service {
    * A registration failure leaves the old model-facing tool and payload unchanged.
    */
   activate(id: string, version: string): void {
-    const stored = this.package(id, version)
-    const next = this.register(id, version, stored.entry)
+    this.package(id, version)
+    const next = this.register(id, version)
     const previous = this.active.get(id)
     this.active.set(id, next)
     previous?.dispose()
@@ -153,6 +161,7 @@ export class EnterpriseRuntimeService extends Service {
   async uninstall(id: string): Promise<void> {
     this.active.get(id)?.dispose()
     this.active.delete(id)
+    // oxlint-disable-next-line typescript/no-dynamic-delete -- package ids are manifest-controlled inventory keys.
     delete this.inventory.packages[id]
     await rm(resolve(this.root, id), { recursive: true, force: true })
     await this.save()
@@ -175,7 +184,7 @@ export class EnterpriseRuntimeService extends Service {
     return { template: item.entry, rows: [...result.rows], ...result.nextCursor === undefined ? {} : { nextCursor: result.nextCursor } }
   }
 
-  private register(id: string, version: string, entry: ListTemplate): ActiveCapability {
+  private register(id: string, version: string): ActiveCapability {
     const toolName = capabilityToolName(id, version)
     const dispose = this.ctx.tools.register(defineTool({
       name: toolName,
@@ -188,7 +197,7 @@ export class EnterpriseRuntimeService extends Service {
       execute: async (_args, exec) => {
         const result = await this.invoke(id, exec.signal)
         if (result instanceof RuntimeError) throw result
-        return result
+        return toolOutput(result)
       },
     }))
     return { version, toolName, dispose }
@@ -244,17 +253,25 @@ function parseManifest(raw: Uint8Array | undefined): RuntimeManifest {
 function parseEntry(raw: Uint8Array | undefined): ListTemplate {
   if (raw === undefined) throw new RuntimeError('entry-missing')
   const value = JSON.parse(Buffer.from(raw).toString('utf8')) as Record<string, unknown>
-  if (value.kind !== 'list' || typeof value.title !== 'string' || (value.dataAction !== undefined && value.dataAction !== 'query')) throw new RuntimeError('template-invalid')
-  return value as ListTemplate
+  const dataAction = value.dataAction
+  if (value.kind !== 'list' || typeof value.title !== 'string' || (dataAction !== undefined && dataAction !== 'query')) throw new RuntimeError('template-invalid')
+  return { kind: 'list', title: value.title, ...dataAction === undefined ? {} : { dataAction } }
+}
+
+function toolOutput(result: RuntimeResult): ToolOutput {
+  const serialized = JSON.stringify(result)
+  if (serialized === undefined) throw new RuntimeError('data-source-output-invalid')
+  return JSON.parse(serialized) as ToolOutput
 }
 
 function readZip(zip: Uint8Array, limits: Required<Omit<Config, 'storageDir'>>): Promise<Map<string, Uint8Array>> {
+  // oxlint-disable-next-line @stylistic/max-len -- callback signature matches the yauzl API.
   return new Promise((resolvePromise, reject) => yauzl.fromBuffer(Buffer.from(zip), { lazyEntries: true, validateEntrySizes: true }, (openError, archive) => {
     if (openError !== null || archive === undefined) { reject(new RuntimeError(openError?.message.includes('relative path') ? 'unsafe-path' : 'zip-invalid')); return }
     const files = new Map<string, Uint8Array>()
     let total = 0
     let count = 0
-    archive.on('entry', entry => {
+    archive.on('entry', (entry) => {
       try {
         safeDestination('/', entry.fileName)
         if (files.has(entry.fileName)) throw new RuntimeError('duplicate-zip-member')
@@ -264,7 +281,7 @@ function readZip(zip: Uint8Array, limits: Required<Omit<Config, 'storageDir'>>):
           const chunks: Buffer[] = []
           stream.on('data', chunk => chunks.push(chunk))
           stream.on('end', () => { files.set(entry.fileName, Buffer.concat(chunks)); archive.readEntry() })
-          stream.on('error', error => { archive.close(); reject(error) })
+          stream.on('error', (error) => { archive.close(); reject(error) })
         })
       } catch (error) { archive.close(); reject(error) }
     })
