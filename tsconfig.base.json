@@ -413,6 +413,13 @@
       "@deepseek-ai/dsh-message-quotes/client": ["./packages/session/message-quotes/src/client/index.ts"],
       "@deepseek-ai/dsh-ptc-runtime-node/configuration": ["./packages/ptc-runtime/ptc-runtime-node/src/configuration.ts"],
       "@deepseek-ai/dsh-image-iterate-plugin/client": ["./packages/bundle/image-iterate-plugin/src/client/index.ts"],
+      "@deepseek-ai/dsh-experimental-enterprise-runtime": ["./packages/experimental/enterprise-runtime/src"],
+      "@deepseek-ai/dsh-experimental-enterprise-runtime-bundle": ["./packages/experimental/enterprise-runtime-bundle/src"],
+      "@ruyi/dsh-data-sources": ["./packages/bundle/data-sources/src"],
+      "@ruyi/dsh-data-sources/client": ["./packages/bundle/data-sources/src/client/index.ts"],
+      "@ruyi/dsh-data-sources/types": ["./packages/bundle/data-sources/src/types/api.ts"],
+      "@ruyi/dsh-data-sources/remote": ["./packages/bundle/data-sources/lib/typert.remote-client.d.ts"],
+      "@ruyi/dsh-data-sources/typert": ["./packages/bundle/data-sources/lib/typert.host.d.ts"],
       // BEGIN generated package aliases — pnpm run gen-tsconfig-paths
       "@deepseek-ai/dsh-acp": ["./packages/acp/acp/src"],
       "@deepseek-ai/dsh-acp-app": ["./packages/bundle/acp-app/src"],
