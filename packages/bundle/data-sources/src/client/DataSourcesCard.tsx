@@ -42,6 +42,25 @@ type PendingAction =
   | { readonly type: 'kind'; readonly kind: DraftKind }
   | { readonly type: 'remove' }
 
+function credentialSample(kind: DraftKind): string {
+  switch (kind) {
+    case 'mysql':
+      return 'MY_MYSQL_AUTH: \'{"username":"root","password":"your_password"}\''
+    case 'postgresql':
+      return 'MY_PG_AUTH: \'{"username":"postgres","password":"your_password"}\''
+    case 's3':
+      return 'MY_S3_AUTH: \'{"accessKeyId":"AKIA...","secretAccessKey":"..."}\''
+    case 'sftp':
+      return 'MY_SFTP_AUTH: \'{"username":"user","privateKey":"-----BEGIN..."}\''
+    case 'ftp':
+      return 'MY_FTP_AUTH: \'{"username":"ftpuser","password":"..."}\''
+    case 'webdav':
+      return 'MY_WEBDAV_AUTH: \'{"username":"user","password":"..."}\''
+    default:
+      return 'MY_DB_AUTH: \'{"username":"...","password":"..."}\''
+  }
+}
+
 /** Render one configured source without ever placing a credential value in the DOM. */
 export function DataSourcesCard(props: DataSourcesCardProps) {
   const state = props.useDataSourcesSettings(snapshot => snapshot)
@@ -179,7 +198,26 @@ export function DataSourcesCard(props: DataSourcesCardProps) {
     {['sftp', 'ftp', 'mysql', 'postgresql'].includes(draft.kind) ? input('host', props.t('host'), draft.connection.host, value => update(source => ({ ...source, connection: { ...source.connection, host: value } }))) : null}
     {databaseKinds.includes(draft.kind as SourceKind) ? input('database', props.t('database'), draft.connection.database, value => update(source => ({ ...source, connection: { ...source.connection, database: value } }))) : null}
     {draft.kind === 'sftp' ? input('known-hosts', props.t('knownHostsPath'), draft.connection.knownHostsPath, value => update(source => ({ ...source, connection: { ...source.connection, knownHostsPath: value } }))) : null}
-    {draft.kind !== 'local-directory' ? input('credential-reference', props.t('credentialRef'), draft.credentialRef, value => update(source => ({ ...source, credentialRef: value })), { hint: props.t('credentialHint') }) : null}
+    {draft.kind !== 'local-directory' ? (
+      <>
+        {input(
+          'credential-reference',
+          props.t('credentialRef'),
+          draft.credentialRef,
+          value => update(source => ({ ...source, credentialRef: value })),
+          { hint: props.t('credentialHint') },
+        )}
+        <details className={styles.credentialGuide}>
+          <summary>{props.t('credentialGuideTitle')}</summary>
+          <div className={styles.credentialGuideContent}>
+            <p>{props.t('credentialGuideDesc')}</p>
+            <pre className={styles.credentialCode}>
+              <code>{`# ~/.dsh/.credentials.yaml\nversion: 1\nrefs:\n  ${credentialSample(draft.kind)}`}</code>
+            </pre>
+          </div>
+        </details>
+      </>
+    ) : null}
   </>
 
   return <section className={styles.section} aria-label={props.t('title')} aria-busy={!state.available || state.saving}>

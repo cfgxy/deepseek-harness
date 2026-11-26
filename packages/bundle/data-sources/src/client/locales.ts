@@ -9,12 +9,16 @@ export type DataSourcesLocaleKey =
   | 'mountedHint' | 'databaseHint' | 'validationFailed' | 'saveFailed' | 'saveConflict' | 'updating' | 'probeIdle'
   | 'envBannerTitle' | 'envBannerDesc' | 'envMissingTag' | 'envUvFound' | 'installEnv' | 'installingEnv' | 'envReady' | 'reloadMcp' | 'reloadingMcp'
   | 'panel' | 'pageTitle' | 'pageSubtitle'
+  | 'credentialGuideTitle' | 'credentialGuideDesc'
 
 export const en: Record<DataSourcesLocaleKey, string> = {
   panel: 'Data sources', pageTitle: 'Data sources', pageSubtitle: 'Reads only from the scope you specify. Source data is never changed.',
   title: 'Data sources', description: 'Reads only from the scope you specify. Source data is never changed.',
   summary: 'Configured data sources', emptySummary: 'No data sources configured', sources: 'Configured sources', add: 'Add source', empty: 'No data sources yet. Add files, object storage, or a database for your assistant to read.',
-  edit: 'Edit source', label: 'Source name', kind: 'Type', enabled: 'Enabled', disabled: 'Disabled', credentialRef: 'Credential reference (optional)', credentialHint: 'Credentials are referenced by name on the host. Do not paste passwords or keys.',
+  edit: 'Edit source', label: 'Source name', kind: 'Type', enabled: 'Enabled', disabled: 'Disabled', credentialRef: 'Credential reference (optional)',
+  credentialHint: 'Matches the name in ~/.dsh/.credentials.yaml or env vars. Passwords are never stored in UI settings.',
+  credentialGuideTitle: 'Where to configure credentials?',
+  credentialGuideDesc: 'Credentials are kept out of plain config. Add the reference in ~/.dsh/.credentials.yaml (or export as an env var):',
   connection: 'Connection', endpoint: 'Endpoint', bucket: 'Bucket', region: 'Region', host: 'Host', port: 'Port', database: 'Database name', knownHostsPath: 'Known hosts file',
   timeoutMs: 'Connection timeout (ms)', statementTimeoutMs: 'Statement timeout (ms)', policy: 'Read policy', maxBytes: 'Max bytes per read', maxRows: 'Max rows per read', allowedPath: 'Allowed directory', allowedPrefix: 'Allowed object prefix',
   save: 'Save changes', saving: 'Saving…', saved: 'Changes saved.', test: 'Test connection', testing: 'Testing connection…', testSuccess: 'Connection succeeded.', testFailed: 'Connection test failed. Check the connection settings and the credential reference on the host.', testDisabledDirty: 'Save your changes first.', testDisabledSource: 'Enable this source first.', cancel: 'Cancel', discard: 'Discard changes', unsaved: 'Unsaved changes',
@@ -28,7 +32,10 @@ export const zh: Record<DataSourcesLocaleKey, string> = {
   panel: '数据源接入', pageTitle: '数据源接入', pageSubtitle: '配置只读数据源（MySQL、PostgreSQL、S3、SFTP、FTP、WebDAV、SMB、NFS、本地目录），供助手安全读取与分析。',
   title: '数据源', description: '仅从你指定的范围读取数据，不会修改源数据。',
   summary: '已配置数据源', emptySummary: '尚未配置数据源', sources: '已配置数据源', add: '添加数据源', empty: '还没有数据源。添加文件、对象存储或数据库，供助手读取。',
-  edit: '编辑数据源', label: '数据源名称', kind: '类型', enabled: '已启用', disabled: '已停用', credentialRef: '凭据引用（可选）', credentialHint: '只填宿主机上的引用名，不要粘贴密码或密钥。',
+  edit: '编辑数据源', label: '数据源名称', kind: '类型', enabled: '已启用', disabled: '已停用', credentialRef: '凭据引用（可选）',
+  credentialHint: '对应宿主机 ~/.dsh/.credentials.yaml 或环境变量中的引用名（如 MY_DB_AUTH），界面与配置不存密码明文。',
+  credentialGuideTitle: '在哪里配置凭据？',
+  credentialGuideDesc: '按安全规范密码不存入界面与普通配置。请在宿主机 ~/.dsh/.credentials.yaml 的 refs 下添加（或设为环境变量）：',
   connection: '连接配置', endpoint: '端点', bucket: '存储桶', region: '区域', host: '主机', port: '端口', database: '数据库名称', knownHostsPath: '已知主机文件',
   timeoutMs: '连接超时（毫秒）', statementTimeoutMs: '语句超时（毫秒）', policy: '读取策略', maxBytes: '单次最多读取（字节）', maxRows: '单次最多返回的行数', allowedPath: '允许读取的目录', allowedPrefix: '允许读取的对象前缀',
   save: '保存更改', saving: '保存中…', saved: '更改已保存。', test: '测试连接', testing: '正在测试连接…', testSuccess: '连接成功。', testFailed: '连接测试失败。请检查连接配置和宿主机上的凭据引用。', testDisabledDirty: '请先保存更改。', testDisabledSource: '请先启用数据源。', cancel: '取消', discard: '放弃更改', unsaved: '未保存的更改',
