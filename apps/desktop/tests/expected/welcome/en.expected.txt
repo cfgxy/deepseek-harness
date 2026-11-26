@@ -2,5 +2,6 @@ DeepSeek Harness
 DeepSeek Harness
 Welcome to DeepSeek Harness
 Build potential. Explore intelligence.
-Sign in
+Sign in with Pa诺云
+Sign in with DeepSeek
 Add API Key

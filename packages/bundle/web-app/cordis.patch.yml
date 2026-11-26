@@ -234,6 +234,12 @@
     - id: data-sources
       name: '@ruyi/dsh-data-sources'
 
+    # Built-in declarative enterprise capability ZIP runtime
+    - id: enterprise-runtime
+      name: '@deepseek-ai/dsh-experimental-enterprise-runtime'
+      config:
+        storageDir: .enterprise-runtime
+
     # Owns both ends of the web transport: node half binds the gateway to the
     # webserver under /api; browser half is the fetch/SSE client. Every API
     # request and upgrade passes the loopback, listener-bind, or trustedHosts

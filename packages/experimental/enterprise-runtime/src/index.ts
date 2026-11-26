@@ -95,6 +95,10 @@ export class EnterpriseRuntimeService extends Service {
     }, 'enterprise-runtime: deactivate packages')
   }
 
+  protected async [Service.init](): Promise<void> {
+    await this.load()
+  }
+
   /** Reload durable package metadata; capabilities deliberately stay inactive after restart. */
   async load(): Promise<void> {
     try {
@@ -290,3 +294,5 @@ function readZip(zip: Uint8Array, limits: Required<Omit<Config, 'storageDir'>>):
     archive.readEntry()
   }))
 }
+
+export default EnterpriseRuntimeService

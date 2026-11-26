@@ -190,9 +190,13 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
     child = ctx.plugin(McpClient, McpClient.Config({
       transport: 'stdio', serverName: 'data-sources-python', command: config.pythonCommand ?? 'uv',
       args: ['run', '--frozen', 'dsh-data-sources-mcp'], cwd, env: pythonEnvironment(bootstrap),
-      failOnStartupError: true, reconnect: { enabled: false },
+      failOnStartupError: false, reconnect: { enabled: false },
     }))
     yield async () => { await child.dispose(); await broker.dispose() }
   }, 'data-sources.python-mcp')
-  await child.await()
+  try {
+    await child.await()
+  } catch (error) {
+    ctx.logger.warn('data-sources: optional python MCP bridge is unavailable (%s); native data source tools remain active', error instanceof Error ? error.message : String(error))
+  }
 }

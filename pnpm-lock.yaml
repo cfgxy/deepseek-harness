@@ -3472,6 +3472,9 @@ importers:
       '@ruyi/dsh-data-sources':
         specifier: workspace:*
         version: link:../data-sources
+      '@deepseek-ai/dsh-experimental-enterprise-runtime':
+        specifier: workspace:*
+        version: link:../../experimental/enterprise-runtime
       commander:
         specifier: ^15.0.0
         version: 15.0.0
