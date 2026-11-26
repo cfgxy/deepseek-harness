@@ -3469,6 +3469,9 @@ importers:
       '@deepseek-ai/schemastery':
         specifier: link:../../../vendor/schemastery
         version: link:../../../vendor/schemastery
+      '@ruyi/dsh-data-sources':
+        specifier: workspace:*
+        version: link:../data-sources
       commander:
         specifier: ^15.0.0
         version: 15.0.0

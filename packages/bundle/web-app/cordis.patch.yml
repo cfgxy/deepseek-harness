@@ -230,6 +230,10 @@
     - id: image-iterate-plugin
       name: '@deepseek-ai/dsh-image-iterate-plugin'
 
+    # Built-in unified read-only data sources plugin
+    - id: data-sources
+      name: '@ruyi/dsh-data-sources'
+
     # Owns both ends of the web transport: node half binds the gateway to the
     # webserver under /api; browser half is the fetch/SSE client. Every API
     # request and upgrade passes the loopback, listener-bind, or trustedHosts
