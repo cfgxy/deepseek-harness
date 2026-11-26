@@ -2,6 +2,7 @@
 
 import type { Context as ClientContext } from '@deepseek-ai/cordis'
 import type { SessionId } from '@deepseek-ai/dsh-session/types'
+import type { MainPanelId } from '@deepseek-ai/dsh-client-ui-layout/client'
 import type {} from '@deepseek-ai/dsh-client-ui-tool/client'
 import type {} from '@deepseek-ai/dsh-client-locale/client'
 import type {} from '@deepseek-ai/dsh-client-ui-sidebar/client'
@@ -13,6 +14,8 @@ import { CordisActionRow } from './CordisActionRow.tsx'
 import { CordisDefineRow } from './CordisDefineRow.tsx'
 import { CordisRunRow } from './CordisRunRow.tsx'
 import { CordisPanel } from './CordisPanel.tsx'
+import { CordisPanelIcon } from './CordisPanelIcon.tsx'
+import { CordisEnginePage } from './CordisEnginePage.tsx'
 import { createCordisInventory } from './inventory.ts'
 import { CordisRunCardRegistry } from './run-card-index.ts'
 import type { CordisDynamicPort } from './dynamic-port.ts'
@@ -32,6 +35,11 @@ export type {
   DynamicCordisInventoryRow, DynamicCordisPackage, DynamicCordisRetracted,
 } from './events.ts'
 export type { CordisKey } from './locales.ts'
+export type { CordisEnginePageProps } from './CordisEnginePage.tsx'
+export { CordisPanelIcon } from './CordisPanelIcon.tsx'
+export { CordisEnginePage } from './CordisEnginePage.tsx'
+
+export const CORDIS_PANEL_ID = 'cordis' as MainPanelId
 
 /** Required services for historical cards, the panel, and Remote lifecycle actions. */
 export const inject = [
@@ -83,34 +91,52 @@ export function apply(ctx: ClientContext): void {
     inventory.refresh()
   })
 
+  const t = ctx.locale.bind(NS)
+  const panelFace = (): CordisPanelFace => ({
+    hooks: {
+      inventory,
+      activeRuns: runner.activeRuns,
+      runErrors: runner.lastRunError,
+      loaded,
+      renderFailures: runner.renderFailures,
+    },
+    onApprove: (requestId, approveFutureVersions) => runner.approve(requestId, approveFutureVersions),
+    onDecline: requestId => runner.decline(requestId),
+    onRun: request => runner.startUserRun(request),
+    onStop: async (sessionId, pluginId) => {
+      const result = await port.stop(sessionId, pluginId)
+      inventory.refresh()
+      return result
+    },
+    onRemove: async (sessionId, pluginId) => {
+      const result = await port.remove(sessionId, pluginId)
+      if (result.ok) inventory.retire(pluginId)
+      inventory.refresh()
+      return result
+    },
+    onRefresh: () => { inventory.refresh() },
+  })
+
+  ctx.slots.inject('sidebar.panellist', () => ctx.slots.register({
+    name: 'sidebar.panellist',
+    id: CORDIS_PANEL_ID,
+    order: 15,
+    locale: NS,
+    label: () => t('engine.panel'),
+  }, CordisPanelIcon))
+
+  ctx.slots.inject('main', () => ctx.slots.register({
+    name: 'main',
+    key: CORDIS_PANEL_ID,
+    locale: NS,
+    inject: panelFace,
+  }, CordisEnginePage))
+
   ctx.slots.inject('sidebar.footer.action', () => ctx.slots.register({
     name: 'sidebar.footer.action',
     id: 'cordis-panel',
     locale: NS,
-    inject: (): CordisPanelFace => ({
-      hooks: {
-        inventory,
-        activeRuns: runner.activeRuns,
-        runErrors: runner.lastRunError,
-        loaded,
-        renderFailures: runner.renderFailures,
-      },
-      onApprove: (requestId, approveFutureVersions) => runner.approve(requestId, approveFutureVersions),
-      onDecline: requestId => runner.decline(requestId),
-      onRun: request => runner.startUserRun(request),
-      onStop: async (sessionId, pluginId) => {
-        const result = await port.stop(sessionId, pluginId)
-        inventory.refresh()
-        return result
-      },
-      onRemove: async (sessionId, pluginId) => {
-        const result = await port.remove(sessionId, pluginId)
-        if (result.ok) inventory.retire(pluginId)
-        inventory.refresh()
-        return result
-      },
-      onRefresh: () => { inventory.refresh() },
-    }),
+    inject: panelFace,
   }, CordisPanel))
 
   const cardFace = (): CordisCardFace => ({ hooks: { inventory, loaded } })

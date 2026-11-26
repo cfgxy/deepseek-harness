@@ -8,8 +8,10 @@ export type DataSourcesLocaleKey =
   | 'typeRequired' | 'sourceType' | 'selectType' | 'localGroup' | 'objectGroup' | 'remoteGroup' | 'databaseGroup' | 'ftpWarning'
   | 'mountedHint' | 'databaseHint' | 'validationFailed' | 'saveFailed' | 'saveConflict' | 'updating' | 'probeIdle'
   | 'envBannerTitle' | 'envBannerDesc' | 'envMissingTag' | 'envUvFound' | 'installEnv' | 'installingEnv' | 'envReady' | 'reloadMcp' | 'reloadingMcp'
+  | 'panel' | 'pageTitle' | 'pageSubtitle'
 
 export const en: Record<DataSourcesLocaleKey, string> = {
+  panel: 'Data sources', pageTitle: 'Data sources', pageSubtitle: 'Reads only from the scope you specify. Source data is never changed.',
   title: 'Data sources', description: 'Reads only from the scope you specify. Source data is never changed.',
   summary: 'Configured data sources', emptySummary: 'No data sources configured', sources: 'Configured sources', add: 'Add source', empty: 'No data sources yet. Add files, object storage, or a database for your assistant to read.',
   edit: 'Edit source', label: 'Source name', kind: 'Type', enabled: 'Enabled', disabled: 'Disabled', credentialRef: 'Credential reference (optional)', credentialHint: 'Credentials are referenced by name on the host. Do not paste passwords or keys.',
@@ -23,6 +25,7 @@ export const en: Record<DataSourcesLocaleKey, string> = {
 }
 
 export const zh: Record<DataSourcesLocaleKey, string> = {
+  panel: '数据源接入', pageTitle: '数据源接入', pageSubtitle: '配置只读数据源（MySQL、PostgreSQL、S3、SFTP、FTP、WebDAV、SMB、NFS、本地目录），供助手安全读取与分析。',
   title: '数据源', description: '仅从你指定的范围读取数据，不会修改源数据。',
   summary: '已配置数据源', emptySummary: '尚未配置数据源', sources: '已配置数据源', add: '添加数据源', empty: '还没有数据源。添加文件、对象存储或数据库，供助手读取。',
   edit: '编辑数据源', label: '数据源名称', kind: '类型', enabled: '已启用', disabled: '已停用', credentialRef: '凭据引用（可选）', credentialHint: '只填宿主机上的引用名，不要粘贴密码或密钥。',
