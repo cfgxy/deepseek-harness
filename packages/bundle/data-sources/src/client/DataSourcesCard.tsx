@@ -1,5 +1,5 @@
 /* oxlint-disable @stylistic/max-len, @stylistic/member-delimiter-style, typescript/no-confusing-void-expression -- dense JSX keeps each field's allowlisted write adjacent to its control. */
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import type { ReactElement } from 'react'
 import { Button, Modal, StateDot, Switch, Tag } from '@deepseek-ai/dsh-client-ui-primitives'
 import type { InjectFace, PropsLocale, PropsRuntime } from '@deepseek-ai/dsh-client-ui-slots'
@@ -18,6 +18,21 @@ function probeState(phase: 'idle' | 'pending' | 'success' | 'error'): 'idle' | '
   return states[phase]
 }
 
+type RememberedDraft = {
+  readonly sourceKey: string
+  readonly selectedId: string | undefined
+  readonly draft: DataSourceDraft
+  readonly baseline: DataSourceDraft
+  readonly advanced: boolean
+}
+
+/** Deliberately process-local: a dirty draft survives a same-session page remount, never storage. */
+let rememberedDraft: RememberedDraft | undefined
+
+function sourceKey(sources: readonly DataSourceDraft[], writable: boolean): string {
+  return `${writable}:${sources.map(source => `${source.id}:${source.revision}`).join('|')}`
+}
+
 type PendingAction =
   | { readonly type: 'open'; readonly source: DataSourceDraft }
   | { readonly type: 'add' }
@@ -27,27 +42,41 @@ type PendingAction =
 /** Render one configured source without ever placing a credential value in the DOM. */
 export function DataSourcesCard(props: DataSourcesCardProps) {
   const state = props.useDataSourcesSettings(snapshot => snapshot)
-  const [selectedId, setSelectedId] = useState<string | undefined>()
+  const key = sourceKey(state.sources, state.writable)
+  const restored = rememberedDraft?.sourceKey === key ? rememberedDraft : undefined
+  const [selectedId, setSelectedId] = useState<string | undefined>(() => restored?.selectedId)
   const selected = state.sources.find(source => source.id === selectedId)
-  const [draft, setDraft] = useState<DataSourceDraft | undefined>()
-  const [baseline, setBaseline] = useState<DataSourceDraft | undefined>()
+  const [draft, setDraft] = useState<DataSourceDraft | undefined>(() => restored === undefined ? undefined : copy(restored.draft))
+  const [baseline, setBaseline] = useState<DataSourceDraft | undefined>(() => restored === undefined ? undefined : copy(restored.baseline))
   const [error, setError] = useState<string | undefined>()
   const [notice, setNotice] = useState<string | undefined>()
   const [confirm, setConfirm] = useState<'discard' | 'remove' | undefined>()
   const [pendingAction, setPendingAction] = useState<PendingAction | undefined>()
-  const [advanced, setAdvanced] = useState(false)
+  const [advanced, setAdvanced] = useState(() => restored?.advanced ?? false)
+  const restoredSelection = useRef(restored !== undefined)
+  const previousSelectedId = useRef<string | undefined>(selectedId)
+  const preserveNoticeForId = useRef<string | undefined>()
 
   useEffect(() => {
     if (selected === undefined) return
+    if (restoredSelection.current) { restoredSelection.current = false; return }
+    const switched = previousSelectedId.current !== selected.id
+    const preserveNotice = preserveNoticeForId.current === selected.id
+    if (preserveNotice) preserveNoticeForId.current = undefined
+    previousSelectedId.current = selected.id
     const next = copy(selected)
     setDraft(next)
     setBaseline(copy(next))
     setError(undefined)
-    setNotice(undefined)
+    if (switched && !preserveNotice) setNotice(undefined)
     setAdvanced(false)
   }, [selected?.id, selected?.revision])
 
   const dirty = draft !== undefined && baseline !== undefined && JSON.stringify(draft) !== JSON.stringify(baseline)
+  useEffect(() => {
+    if (!dirty) { rememberedDraft = undefined; return }
+    rememberedDraft = { sourceKey: key, selectedId, draft: copy(draft), baseline: copy(baseline), advanced }
+  }, [advanced, baseline, draft, dirty, key, selectedId])
   const isNew = draft !== undefined && !state.sources.some(source => source.id === draft.id)
   const disabled = !state.available || !state.writable || state.saving
   const validation = draft === undefined ? undefined : validateDraft(draft)
@@ -101,6 +130,7 @@ export function DataSourcesCard(props: DataSourcesCardProps) {
     void props.save(draft).then((accepted) => {
       if (!accepted) { setError(props.t('saveFailed')); return }
       setBaseline(copy(draft))
+      preserveNoticeForId.current = draft.id
       setSelectedId(draft.id)
       setNotice(props.t('saved'))
     })

@@ -77,6 +77,7 @@ it('keeps a new source local until save and persists a TLS allowlist only', asyn
   expect(screen.getByRole<HTMLButtonElement>('button', { name: 'Test connection' }).disabled).toBe(true)
   fireEvent.click(screen.getByRole('button', { name: 'Save changes' }))
   await waitFor(() => { expect(remote.mock.log.calls('settings/mutate')).toHaveLength(1) })
+  await waitFor(() => { expect(screen.getByText('Changes saved.')).not.toBeNull() })
   const writes = JSON.stringify(remote.mock.log.calls('settings/mutate'))
   expect(writes).toContain('Analytics database')
   expect(writes).toContain('DB_READONLY')
@@ -176,6 +177,25 @@ it('requires confirmation before removing a dirty source', async () => {
   const removeDialog = await screen.findByRole('dialog', { name: 'Remove data source?' })
   await waitFor(() => { expect(document.activeElement).toBe(within(removeDialog).getByRole('button', { name: 'Cancel' })) })
   fireEvent.click(within(removeDialog).getByRole('button', { name: 'Cancel' }))
+  await unmountAssembledApp()
+})
+
+it('restores a dirty source draft after host navigation in the same session', async () => {
+  mountAssembledApp({ additionalPlugins: [dataSourcesPlugin()], remote: { dataSources: { sources: [{
+    id: 'analytics', revision: '1', kind: 'postgresql', label: 'Analytics', enabled: true, credentialRef: 'DB_READONLY', connection: { host: 'analytics.example.test', database: 'analytics' }, policy: { maxBytes: 65536, maxRows: 100 },
+  }] } } })
+  await openDataSourcesSettings()
+  fireEvent.click(screen.getByRole('button', { name: /Analytics/ }))
+  fireEvent.change(input('label'), { target: { value: 'Recoverable analytics' } })
+  fireEvent.click(screen.getByRole('button', { name: 'Back to plugins' }))
+  const card = await waitFor(() => {
+    const value = document.querySelector<HTMLElement>('[data-plugin-item="data-sources"]')
+    if (value === null) throw new Error('data-sources card missing after navigation')
+    return value
+  })
+  fireEvent.click(within(card).getByRole('button', { name: /^View Data sources$/ }))
+  await waitFor(() => { expect(input('label').value).toBe('Recoverable analytics') })
+  expect(select('kind').value).toBe('postgresql')
   await unmountAssembledApp()
 })
 

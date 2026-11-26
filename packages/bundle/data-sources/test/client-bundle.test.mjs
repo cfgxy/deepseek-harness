@@ -9,7 +9,7 @@ test('client registers a credential-safe settings page and releases every lifeti
   vm.runInNewContext(source, { window: { __ModuleLoader__: { load(value) { registration = value } } }, structuredClone })
   assert.equal(registration.id, '@ruyi/dsh-data-sources')
 
-  const React = { createElement(type, props, ...children) { return { type, props, children } }, useEffect() {}, useState(value) { return [value, () => {}] } }
+  const React = { createElement(type, props, ...children) { return { type, props, children } }, useEffect() {}, useRef(value) { return { current: value } }, useState(value) { return [value, () => {}] } }
   const jsxRuntime = { Fragment: 'Fragment', jsx(type, props) { return { type, props } }, jsxs(type, props) { return { type, props } } }
   const primitives = { Button() { return null }, Input() { return null } }
   const clientStore = { createSnapshotStore(value) { let snapshot = value; return { getSnapshot() { return snapshot }, subscribe() { return () => {} }, set(next) { snapshot = next } } } }
