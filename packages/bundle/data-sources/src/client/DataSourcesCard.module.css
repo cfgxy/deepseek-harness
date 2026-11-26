@@ -113,6 +113,43 @@
 .actions { flex-wrap: wrap; justify-content: flex-end; }
 .remove { align-self: flex-start; color: var(--dsw-alias-state-error-primary); }
 
+.credentialGuide {
+  grid-column: 1 / -1;
+  font-size: 11px;
+  line-height: 16px;
+  color: var(--dsw-alias-label-secondary);
+  background: var(--dsw-alias-surface-subtle, rgba(0, 0, 0, 0.02));
+  border: 0.5px solid var(--dsw-alias-border-l2);
+  border-radius: var(--dsw-radius-sm);
+  padding: 8px 10px;
+  margin-top: -4px;
+}
+.credentialGuide summary {
+  cursor: pointer;
+  color: var(--dsw-alias-state-business-primary);
+  font-weight: 500;
+  user-select: none;
+}
+.credentialGuideContent {
+  margin-top: 6px;
+  display: grid;
+  gap: 4px;
+}
+.credentialGuideContent p {
+  margin: 0;
+  color: var(--dsw-alias-label-secondary);
+}
+.credentialCode {
+  margin: 0;
+  padding: 6px 8px;
+  background: var(--dsw-alias-surface-container, rgba(0, 0, 0, 0.04));
+  border-radius: var(--dsw-radius-xs, 4px);
+  overflow-x: auto;
+  font-family: var(--dsw-font-mono, monospace);
+  font-size: 11px;
+  color: var(--dsw-alias-label-primary);
+}
+
 @media (min-width: 560px) {
   .grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .grid > :nth-child(1):last-child,
