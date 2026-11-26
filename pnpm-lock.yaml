@@ -3472,7 +3472,7 @@ importers:
       '@ruyi/dsh-data-sources':
         specifier: workspace:*
         version: link:../data-sources
-      '@deepseek-ai/dsh-experimental-enterprise-runtime':
+      '@ruyi/dsh-experimental-enterprise-runtime':
         specifier: workspace:*
         version: link:../../experimental/enterprise-runtime
       commander:
@@ -10176,7 +10176,7 @@ importers:
 
   packages/experimental/enterprise-runtime-bundle:
     dependencies:
-      '@deepseek-ai/dsh-experimental-enterprise-runtime':
+      '@ruyi/dsh-experimental-enterprise-runtime':
         specifier: workspace:*
         version: link:../enterprise-runtime
     devDependencies:
