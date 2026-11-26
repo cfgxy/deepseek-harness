@@ -7,12 +7,13 @@ import type { SettingsFormScope } from '@deepseek-ai/dsh-client-ui-primitives'
 export const DATA_SOURCES_NS = 'data-sources'
 
 export type SourceKind = 'local-directory' | 's3' | 'sftp' | 'smb' | 'nfs' | 'ftp' | 'webdav' | 'mysql' | 'postgresql'
+export type DraftKind = SourceKind | ''
 
-/** The only fields the browser is allowed to read or persist for one source. */
+/** Browser-safe projection of one source. It intentionally has no secret value field. */
 export interface DataSourceDraft {
   id: string
   revision: string
-  kind: SourceKind
+  kind: DraftKind
   label: string
   enabled: boolean
   /** Credential identifier only; a secret is resolved exclusively by the Host. */
@@ -27,32 +28,42 @@ export interface DataSourceDraft {
     knownHostsPath: string
     timeoutMs: string
     statementTimeoutMs: string
+    tlsEnabled: boolean
+    tlsCaPath: string
+    tlsServerName: string
   }
   policy: { maxBytes: string; maxRows: string; allowedPath: string; allowedPrefix: string }
 }
 
 interface DataSourcesSettings { sources?: unknown }
+export type ProbeState = { phase: 'idle' | 'pending' | 'success' | 'error'; message?: string }
 
 export interface DataSourcesCardState {
   available: boolean
   writable: boolean
+  saving: boolean
   sources: readonly DataSourceDraft[]
-  probes: Readonly<Record<string, { pending: boolean; message: string }>>
+  probes: Readonly<Record<string, ProbeState>>
 }
 
 export interface DataSourcesCardFace {
   hooks: { dataSourcesSettings: SnapshotStore<DataSourcesCardState> }
-  add: () => void
-  save: (source: DataSourceDraft) => void
+  create: () => DataSourceDraft
+  save: (source: DataSourceDraft) => Promise<boolean>
+  remove: (sourceId: string) => Promise<boolean>
+  setEnabled: (sourceId: string, enabled: boolean) => Promise<boolean>
   test: (sourceId: string) => void
 }
 
 const kinds: readonly SourceKind[] = ['local-directory', 's3', 'sftp', 'smb', 'nfs', 'ftp', 'webdav', 'mysql', 'postgresql']
+const directoryKinds: readonly SourceKind[] = ['local-directory', 'smb', 'nfs', 'sftp', 'ftp', 'webdav']
+const databaseKinds: readonly SourceKind[] = ['mysql', 'postgresql']
 const text = (value: unknown): string => typeof value === 'string' ? value : ''
 const integer = (value: unknown): string => typeof value === 'number' && Number.isInteger(value) ? String(value) : ''
+const optionalInteger = (value: string): number | undefined => value.trim() === '' ? undefined : Number(value)
 
-/** Read an object only long enough to copy its explicit public fields. */
-function sourceDraft(value: unknown): DataSourceDraft | undefined {
+/** Read an object only long enough to copy its explicit non-secret fields. */
+export function sourceDraft(value: unknown): DataSourceDraft | undefined {
   if (typeof value !== 'object' || value === null || Array.isArray(value)) return undefined
   const source = value as Record<string, unknown>
   if (!kinds.includes(source.kind as SourceKind)) return undefined
@@ -60,6 +71,8 @@ function sourceDraft(value: unknown): DataSourceDraft | undefined {
     ? source.connection as Record<string, unknown> : {}
   const policy = typeof source.policy === 'object' && source.policy !== null && !Array.isArray(source.policy)
     ? source.policy as Record<string, unknown> : {}
+  const tls = typeof connection.tls === 'object' && connection.tls !== null && !Array.isArray(connection.tls)
+    ? connection.tls as Record<string, unknown> : {}
   return {
     id: text(source.id), revision: text(source.revision), kind: source.kind as SourceKind,
     label: text(source.label), enabled: source.enabled !== false, credentialRef: text(source.credentialRef),
@@ -67,7 +80,8 @@ function sourceDraft(value: unknown): DataSourceDraft | undefined {
       endpoint: text(connection.endpoint), bucket: text(connection.bucket), region: text(connection.region),
       host: text(connection.host), port: integer(connection.port), database: text(connection.database),
       knownHostsPath: text(connection.knownHostsPath), timeoutMs: integer(connection.timeoutMs),
-      statementTimeoutMs: integer(connection.statementTimeoutMs),
+      statementTimeoutMs: integer(connection.statementTimeoutMs), tlsEnabled: tls.enabled === true,
+      tlsCaPath: text(tls.caPath), tlsServerName: text(tls.serverName),
     },
     policy: {
       maxBytes: integer(policy.maxBytes), maxRows: integer(policy.maxRows),
@@ -76,45 +90,86 @@ function sourceDraft(value: unknown): DataSourceDraft | undefined {
   }
 }
 
-function requiredInteger(value: string, fallback: number): number {
-  const parsed = Number(value)
-  return Number.isInteger(parsed) && parsed > 0 ? parsed : fallback
+/** Return the first user-facing validation problem without sending an invalid draft. */
+export function validateDraft(source: DataSourceDraft): string | undefined {
+  if (!kinds.includes(source.kind as SourceKind)) return 'Select a source type.'
+  if (source.label.trim() === '') return 'Enter a source name.'
+  if (!/^[A-Za-z0-9_-]{1,64}$/.test(source.id)) return 'Source ID is invalid.'
+  if (source.credentialRef.trim() !== '' && !/^[A-Za-z_][A-Za-z0-9_]*$/.test(source.credentialRef.trim())) return 'Credential reference is invalid.'
+  for (const [name, value] of [['maxBytes', source.policy.maxBytes], ['maxRows', source.policy.maxRows]] as const) {
+    if (!Number.isInteger(Number(value)) || Number(value) < 1) return `${name} must be a positive integer.`
+  }
+  const port = optionalInteger(source.connection.port)
+  if (port !== undefined && (!Number.isInteger(port) || port < 1 || port > 65_535)) return 'Port must be a whole number from 1 to 65535.'
+  for (const value of [source.connection.timeoutMs, source.connection.statementTimeoutMs]) {
+    const parsed = optionalInteger(value)
+    if (parsed !== undefined && (!Number.isInteger(parsed) || parsed < 1 || parsed > 120_000)) return 'Timeout must be a whole number from 1 to 120000.'
+  }
+  const kind = source.kind as SourceKind
+  if (directoryKinds.includes(kind) && !source.policy.allowedPath.trim().startsWith('/')) return 'Enter an absolute path starting with /.'
+  if (kind === 's3' && (source.connection.endpoint.trim() === '' || source.connection.bucket.trim() === '' || source.policy.allowedPrefix.trim() === '')) return 'Endpoint, bucket, and object prefix are required.'
+  if (kind === 'sftp' && (source.connection.host.trim() === '' || source.connection.knownHostsPath.trim() === '')) return 'Host and known hosts file are required.'
+  if (kind === 'ftp' && source.connection.host.trim() === '') return 'Host is required.'
+  if (kind === 'webdav') {
+    try {
+      const endpoint = new URL(source.connection.endpoint)
+      if (endpoint.protocol !== 'https:' || endpoint.username || endpoint.password || endpoint.search || endpoint.hash) throw new Error()
+    } catch { return 'Enter an HTTPS WebDAV endpoint without credentials, query, or fragment.' }
+  }
+  if (databaseKinds.includes(kind) && (source.connection.host.trim() === '' || source.connection.database.trim() === '')) return 'Host and database name are required.'
+  if (source.connection.tlsEnabled && !databaseKinds.includes(kind)) return 'TLS is available only for database sources.'
+  if (source.connection.tlsEnabled && source.connection.tlsCaPath.trim() !== '' && !source.connection.tlsCaPath.trim().startsWith('/')) return 'CA certificate path must be absolute.'
+  return undefined
 }
 
-/** Create the complete allowlisted Host config value. */
-function serialise(source: DataSourceDraft): Record<string, unknown> {
-  const connection = {
-    endpoint: source.connection.endpoint.trim(), bucket: source.connection.bucket.trim(), region: source.connection.region.trim(),
-    host: source.connection.host.trim(), port: requiredInteger(source.connection.port, 0), database: source.connection.database.trim(),
-    knownHostsPath: source.connection.knownHostsPath.trim(), timeoutMs: requiredInteger(source.connection.timeoutMs, 10_000),
-    statementTimeoutMs: requiredInteger(source.connection.statementTimeoutMs, 10_000),
+/** Convert a browser draft into the exact per-kind allowlist accepted by the Host. */
+export function serialise(source: DataSourceDraft): Record<string, unknown> {
+  const kind = source.kind as SourceKind
+  const connection: Record<string, unknown> = {}
+  const add = (key: keyof DataSourceDraft['connection']) => {
+    const value = source.connection[key]
+    if (typeof value === 'string' && value.trim() !== '') connection[key] = value.trim()
   }
-  const policy = {
-    maxBytes: requiredInteger(source.policy.maxBytes, 65_536), maxRows: requiredInteger(source.policy.maxRows, 100),
-    allowedPath: source.policy.allowedPath.trim(), allowedPrefix: source.policy.allowedPrefix.trim(),
+  if (kind === 's3' || kind === 'webdav') add('endpoint')
+  if (kind === 's3') { add('bucket'); add('region') }
+  if (['sftp', 'ftp', 'mysql', 'postgresql'].includes(kind)) add('host')
+  if (kind === 'sftp') add('knownHostsPath')
+  if (databaseKinds.includes(kind)) add('database')
+  const port = optionalInteger(source.connection.port)
+  if (port !== undefined) connection.port = port
+  const timeout = optionalInteger(source.connection.timeoutMs)
+  if (timeout !== undefined) connection.timeoutMs = timeout
+  if (databaseKinds.includes(kind)) {
+    const statementTimeout = optionalInteger(source.connection.statementTimeoutMs)
+    if (statementTimeout !== undefined) connection.statementTimeoutMs = statementTimeout
+    if (source.connection.tlsEnabled) {
+      connection.tls = {
+        enabled: true,
+        ...source.connection.tlsCaPath.trim() === '' ? {} : { caPath: source.connection.tlsCaPath.trim() },
+        ...source.connection.tlsServerName.trim() === '' ? {} : { serverName: source.connection.tlsServerName.trim() },
+      }
+    }
   }
+  const policy: Record<string, unknown> = { maxBytes: Number(source.policy.maxBytes), maxRows: Number(source.policy.maxRows) }
+  if (directoryKinds.includes(kind)) policy.allowedPath = source.policy.allowedPath.trim()
+  if (kind === 's3') policy.allowedPrefix = source.policy.allowedPrefix.trim()
   return {
-    id: source.id.trim(), revision: source.revision.trim(), kind: source.kind, label: source.label.trim(), enabled: source.enabled,
-    ...(source.credentialRef.trim() === '' ? {} : { credentialRef: source.credentialRef.trim() }),
-    connection: Object.fromEntries(Object.entries(connection).filter(([, value]) => value !== '' && value !== 0)),
-    policy: Object.fromEntries(Object.entries(policy).filter(([, value]) => value !== '')),
+    id: source.id.trim(), revision: source.revision.trim() || '1', kind, label: source.label.trim(), enabled: source.enabled,
+    ...source.credentialRef.trim() === '' ? {} : { credentialRef: source.credentialRef.trim() },
+    ...Object.keys(connection).length === 0 ? {} : { connection }, policy,
   }
 }
 
-function defaultSource(index: number): DataSourceDraft {
-  return {
-    id: `source-${index}`, revision: '1', kind: 'local-directory', label: `Data source ${index}`, enabled: true, credentialRef: '',
-    connection: { endpoint: '', bucket: '', region: '', host: '', port: '', database: '', knownHostsPath: '', timeoutMs: '10000', statementTimeoutMs: '10000' },
-    policy: { maxBytes: '65536', maxRows: '100', allowedPath: '/', allowedPrefix: '' },
-  }
-}
+function draftSignature(source: DataSourceDraft): string { return JSON.stringify(serialise(source)) }
 
 /** Bridges safe source metadata into the Plugins settings page. */
 export class DataSourcesSettingsController {
   private readonly store: SnapshotStore<DataSourcesCardState>
   private readonly unsubscribe: () => void
   private disposed = false
-  private probes: Record<string, { pending: boolean; message: string }> = {}
+  private saving = false
+  private nextId = 1
+  private probes: Record<string, ProbeState> = {}
 
   constructor(private readonly scope: SettingsFormScope<DataSourcesSettings>, private readonly ctx: Context) {
     this.store = createSnapshotStore(this.projection())
@@ -131,37 +186,75 @@ export class DataSourcesSettingsController {
 
   private projection(): DataSourcesCardState {
     const snapshot = this.scope.getSnapshot()
-    return { available: snapshot.status === 'ready', writable: snapshot.writable, sources: this.sources(), probes: this.probes }
+    return { available: snapshot.status === 'ready', writable: snapshot.writable, saving: this.saving, sources: this.sources(), probes: this.probes }
   }
 
   private publish(): void { if (!this.disposed) this.store.set(this.projection()) }
 
-  private save(source: DataSourceDraft): void {
-    let replaced = false
-    const sources = this.sources().map((current) => {
-      if (current.id !== source.id) return serialise(current)
-      replaced = true
-      return serialise(source)
-    })
-    if (!replaced) sources.push(serialise(source))
-    void this.scope.mutate([{ op: 'set', path: ['sources'], value: sources }]).then(() => this.publish())
+  private async write(sources: readonly DataSourceDraft[]): Promise<boolean> {
+    if (this.saving || !this.scope.getSnapshot().writable) return false
+    this.saving = true
+    this.publish()
+    try {
+      return await this.scope.mutate([{ op: 'set', path: ['sources'], value: sources.map(serialise) }], this.scope.getSnapshot().revision)
+    } finally {
+      this.saving = false
+      this.publish()
+    }
   }
 
-  private add(): void { this.save(defaultSource(this.sources().length + 1)) }
+  private clearProbe(sourceId: string): void {
+    const { [sourceId]: _removed, ...remaining } = this.probes
+    this.probes = remaining
+  }
 
-  /** Probe only by source id. The browser never handles the source credential. */
+  private save(source: DataSourceDraft): Promise<boolean> {
+    const existing = this.sources()
+    const sources = existing.some(current => current.id === source.id)
+      ? existing.map(current => current.id === source.id ? source : current)
+      : [...existing, source]
+    this.clearProbe(source.id)
+    return this.write(sources)
+  }
+
+  private remove(sourceId: string): Promise<boolean> {
+    this.clearProbe(sourceId)
+    return this.write(this.sources().filter(source => source.id !== sourceId))
+  }
+
+  private setEnabled(sourceId: string, enabled: boolean): Promise<boolean> {
+    this.clearProbe(sourceId)
+    return this.write(this.sources().map(source => source.id === sourceId ? { ...source, enabled } : source))
+  }
+
+  private create(): DataSourceDraft {
+    const ids = new Set(this.sources().map(source => source.id))
+    let id = `source-${this.nextId++}`
+    while (ids.has(id)) id = `source-${this.nextId++}`
+    return {
+      id, revision: '1', kind: '', label: '', enabled: true, credentialRef: '',
+      connection: { endpoint: '', bucket: '', region: '', host: '', port: '', database: '', knownHostsPath: '', timeoutMs: '10000', statementTimeoutMs: '', tlsEnabled: false, tlsCaPath: '', tlsServerName: '' },
+      policy: { maxBytes: '65536', maxRows: '100', allowedPath: '', allowedPrefix: '' },
+    }
+  }
+
+  /** Probe only a saved source id and ignore answers made stale by a subsequent write. */
   private test(sourceId: string): void {
-    const probe = this.ctx.remote.dataSources.probe
-    this.probes = { ...this.probes, [sourceId]: { pending: true, message: 'Testing connection…' } }
+    const source = this.sources().find(candidate => candidate.id === sourceId)
+    if (source === undefined || !source.enabled || this.saving) return
+    const signature = draftSignature(source)
+    this.probes = { ...this.probes, [sourceId]: { phase: 'pending', message: 'Testing connection…' } }
     this.publish()
-    void probe({ sourceId }).then((response) => {
-      const message = response.ok
-        ? response.value.ok ? 'Connection succeeded.' : response.value.message ?? 'Connection failed.'
-        : response.error.message ?? 'Connection failed.'
-      this.probes = { ...this.probes, [sourceId]: { pending: false, message } }
+    void this.ctx.remote.dataSources.probe({ sourceId }).then((response) => {
+      const current = this.sources().find(candidate => candidate.id === sourceId)
+      if (current === undefined || !current.enabled || draftSignature(current) !== signature) return
+      const message = response.ok && response.value.ok ? 'Connection succeeded.' : 'Connection test failed. Check the connection settings and the credential reference on the host.'
+      this.probes = { ...this.probes, [sourceId]: { phase: response.ok && response.value.ok ? 'success' : 'error', message } }
       this.publish()
     }, () => {
-      this.probes = { ...this.probes, [sourceId]: { pending: false, message: 'Connection test could not be completed.' } }
+      const current = this.sources().find(candidate => candidate.id === sourceId)
+      if (current === undefined || !current.enabled || draftSignature(current) !== signature) return
+      this.probes = { ...this.probes, [sourceId]: { phase: 'error', message: 'Connection test could not be completed.' } }
       this.publish()
     })
   }
@@ -169,7 +262,11 @@ export class DataSourcesSettingsController {
   inject(): DataSourcesCardFace {
     return {
       hooks: { dataSourcesSettings: this.store },
-      add: () => this.add(), save: source => this.save(source), test: sourceId => this.test(sourceId),
+      create: () => this.create(),
+      save: source => this.save(source),
+      remove: sourceId => this.remove(sourceId),
+      setEnabled: (sourceId, enabled) => this.setEnabled(sourceId, enabled),
+      test: (sourceId) => { this.test(sourceId) },
     }
   }
 

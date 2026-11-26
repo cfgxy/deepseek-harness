@@ -84,7 +84,9 @@ test('client registers a credential-safe settings page and releases every lifeti
     view: 'detail', t: key => key, ...face,
     useDataSourcesSettings(select) { return select(state) },
   })
-  assert.match(JSON.stringify(rendered), /credentialRef/)
+  // Collapsed cards intentionally keep configuration details out of the list;
+  // the credential reference remains available only in the safe controller projection.
+  assert.doesNotMatch(JSON.stringify(rendered), /must-not-render/)
   for (const secret of ['must-not-render', 'token-value', 'api-key-value', 'authorization-value', 'key-material-value', 'neutral-secret-value']) {
     assert.doesNotMatch(JSON.stringify(rendered), new RegExp(secret))
   }

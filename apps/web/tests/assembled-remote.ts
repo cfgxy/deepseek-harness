@@ -325,6 +325,7 @@ export function createAssembledRemote(options: AssembledRemoteOptions = {}): Ass
 
   const settingsDescribe = () => ok({
     ...fixture.settingsDescribe.value,
+    writable: dataSources?.writable ?? fixture.settingsDescribe.value.writable,
     namespaces: [
       ...fixture.settingsDescribe.value.namespaces,
       {

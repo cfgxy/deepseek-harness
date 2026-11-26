@@ -31,18 +31,18 @@ function dataSourcesPlugin(): AdditionalAssembledPlugin {
     || !Array.isArray(declaration.inject) || !declaration.inject.every(item => typeof item === 'string')) {
     throw new Error('data-sources client manifest is incomplete')
   }
-  return {
-    id: manifest.name,
-    bundlePath: resolve(dirname(manifestPath), output),
-    url: `plugins/${manifest.name}/client.js`,
-    rev: 'fixture-data-sources',
-    inject: declaration.inject,
-  }
+  return { id: manifest.name, bundlePath: resolve(dirname(manifestPath), output), url: `plugins/${manifest.name}/client.js`, rev: 'fixture-data-sources', inject: declaration.inject }
 }
 
 function input(name: string): HTMLInputElement {
   const value = document.getElementById(`plugin-config-data-sources-${name}`)
   if (!(value instanceof HTMLInputElement)) throw new Error(`data-sources input missing: ${name}`)
+  return value
+}
+
+function select(name: string): HTMLSelectElement {
+  const value = document.getElementById(`plugin-config-data-sources-${name}`)
+  if (!(value instanceof HTMLSelectElement)) throw new Error(`data-sources select missing: ${name}`)
   return value
 }
 
@@ -54,68 +54,59 @@ async function openDataSourcesSettings(): Promise<void> {
     return value
   })
   fireEvent.click(within(card).getByRole('button', { name: /^View Data sources$/ }))
-  fireEvent.click(screen.getByRole('button', { name: 'Add source' }))
-  await waitFor(() => { input('credential-reference') }, { timeout: 1_000 }).catch(() => {
-    const section = document.querySelector('section[aria-label]')
-    throw new Error(`data-sources editor did not become ready: ${section?.textContent ?? 'section missing'}`)
-  })
 }
 
-it('renders and saves the assembled source editor with only a credential reference', async () => {
-  const remote = mountAssembledApp({
-    additionalPlugins: [dataSourcesPlugin()],
-    remote: {
-      dataSources: {},
-    },
-  })
-
-  await openDataSourcesSettings()
+function fillPostgresDraft(): void {
+  fireEvent.change(select('kind'), { target: { value: 'postgresql' } })
+  fireEvent.change(input('label'), { target: { value: 'Analytics database' } })
+  fireEvent.change(input('host'), { target: { value: 'db.example.test' } })
+  fireEvent.change(input('database'), { target: { value: 'analytics' } })
   fireEvent.change(input('credential-reference'), { target: { value: 'DB_READONLY' } })
-  expect(input('credential-reference').value).toBe('DB_READONLY')
-  expect(screen.getByRole('button', { name: /test/i })).not.toBeNull()
-  const text = document.body.textContent ?? ''
-  expect(text).toContain('Credentials are referenced by name')
+}
 
-  fireEvent.change(input('label'), { target: { value: 'Renamed fixture' } })
-  const form = input('label').closest('form')
-  if (form === null) throw new Error('data-sources form missing')
-  fireEvent.submit(form)
-  await waitFor(() => { expect(remote.mock.log.calls('settings/mutate')).toHaveLength(2) })
+it('keeps a new source local until save and persists a TLS allowlist only', async () => {
+  const remote = mountAssembledApp({ additionalPlugins: [dataSourcesPlugin()], remote: { dataSources: {} } })
+  await openDataSourcesSettings()
+  fireEvent.click(screen.getByRole('button', { name: 'Add source' }))
+  expect(remote.mock.log.calls('settings/mutate')).toHaveLength(0)
+  fillPostgresDraft()
+  fireEvent.click(screen.getByText('Advanced settings'))
+  fireEvent.click(screen.getByRole('switch', { name: 'Enable TLS' }))
+  fireEvent.change(input('tls-ca-path'), { target: { value: '/etc/ssl/ca.pem' } })
+  fireEvent.change(input('tls-server-name'), { target: { value: 'db.example.test' } })
+  expect(screen.getByRole<HTMLButtonElement>('button', { name: 'Test connection' }).disabled).toBe(true)
+  fireEvent.click(screen.getByRole('button', { name: 'Save changes' }))
+  await waitFor(() => { expect(remote.mock.log.calls('settings/mutate')).toHaveLength(1) })
   const writes = JSON.stringify(remote.mock.log.calls('settings/mutate'))
-  expect(writes).toContain('Renamed fixture')
-  expect(writes).not.toContain('rejectUnauthorized')
+  expect(writes).toContain('Analytics database')
   expect(writes).toContain('DB_READONLY')
-
-  await unmountAssembledApp()
-  expect(document.querySelector('[data-plugin-item="data-sources"]')).toBeNull()
-})
-
-it('invokes the assembled Host probe and renders success', async () => {
-  const remote = mountAssembledApp({
-    additionalPlugins: [dataSourcesPlugin()],
-    remote: { dataSources: { probe: { ok: true } } },
-  })
-
-  await openDataSourcesSettings()
-  fireEvent.click(screen.getByRole('button', { name: /test connection/i }))
-  await waitFor(() => { expect(screen.getByRole('status').textContent).toContain('Connection succeeded.') })
-  expect(remote.mock.log.calls('dataSources/probe')).toHaveLength(1)
-  expect(remote.mock.log.requests('dataSources/probe')).toEqual([{ request: { sourceId: 'source-1' } }])
-
+  expect(writes).toContain('tls')
+  expect(writes).not.toContain('password')
+  expect(writes).not.toContain('secretAccessKey')
   await unmountAssembledApp()
 })
 
-it('renders the fixed safe failure from the assembled Host probe', async () => {
+it('probes only a saved source id and renders a safe result', async () => {
   const remote = mountAssembledApp({
     additionalPlugins: [dataSourcesPlugin()],
-    remote: { dataSources: { probe: { ok: false, message: 'Connection test failed.' } } },
+    remote: { dataSources: { probe: { ok: false, message: 'host secret must not render' }, sources: [{
+      id: 'analytics', revision: '1', kind: 'postgresql', label: 'Analytics', enabled: true, credentialRef: 'DB_READONLY',
+      connection: { host: 'db.example.test', database: 'analytics', tls: { enabled: true, caPath: '/etc/ssl/ca.pem' } }, policy: { maxBytes: 65536, maxRows: 100 },
+    }] } },
   })
-
   await openDataSourcesSettings()
-  fireEvent.click(screen.getByRole('button', { name: /test connection/i }))
+  fireEvent.click(screen.getByRole('button', { name: /Analytics/ }))
+  fireEvent.click(screen.getByRole('button', { name: 'Test connection' }))
   await waitFor(() => { expect(screen.getByRole('status').textContent).toContain('Connection test failed.') })
-  expect(remote.mock.log.calls('dataSources/probe')).toHaveLength(1)
-  expect(remote.mock.log.requests('dataSources/probe')).toEqual([{ request: { sourceId: 'source-1' } }])
+  expect(document.body.textContent).not.toContain('host secret must not render')
+  expect(remote.mock.log.requests('dataSources/probe')).toEqual([{ request: { sourceId: 'analytics' } }])
+  await unmountAssembledApp()
+})
 
+it('does not offer writes to a read-only settings document', async () => {
+  const remote = mountAssembledApp({ additionalPlugins: [dataSourcesPlugin()], remote: { dataSources: { writable: false } } })
+  await openDataSourcesSettings()
+  expect(screen.getByRole<HTMLButtonElement>('button', { name: 'Add source' }).disabled).toBe(true)
+  expect(remote.mock.log.calls('settings/mutate')).toHaveLength(0)
   await unmountAssembledApp()
 })

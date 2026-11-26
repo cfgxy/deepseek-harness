@@ -1,0 +1,102 @@
+.section {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  max-width: 760px;
+  color: var(--dsw-alias-label-primary);
+}
+
+.header,
+.cardHead,
+.editorTop,
+.actions,
+.toggle {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.header { justify-content: space-between; }
+.header h2,
+.header p,
+.empty p,
+.hint,
+.notice,
+.error,
+.success,
+.probe { margin: 0; }
+.header h2 { font-size: 16px; line-height: 22px; }
+.header p,
+.hint,
+.notice { color: var(--dsw-alias-label-secondary); font-size: 12px; line-height: 18px; }
+
+.list { display: flex; flex-direction: column; gap: 8px; }
+.card,
+.empty {
+  border: 0.5px solid var(--dsw-alias-settings-card-stroke);
+  border-radius: var(--dsw-radius-lg);
+  background: var(--dsw-alias-settings-card-fill);
+}
+.card { overflow: hidden; }
+.empty { padding: 24px 16px; display: grid; justify-items: start; gap: 12px; }
+.cardHead { padding: 12px 14px; }
+.disclosure {
+  display: flex;
+  flex: 1 1 auto;
+  min-width: 0;
+  align-items: center;
+  gap: 10px;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+  text-align: left;
+}
+.disclosure:focus-visible,
+.advanced summary:focus-visible { outline: 2px solid var(--dsw-alias-state-business-primary); outline-offset: 2px; }
+.icon { display: grid; flex: none; width: 28px; height: 28px; place-items: center; border-radius: var(--dsw-radius-md); background: var(--dsw-alias-bg-module-platform); color: var(--dsw-alias-label-secondary); font-size: 12px; }
+.identity { display: grid; min-width: 0; }
+.identity strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 14px; line-height: 20px; }
+.identity small { color: var(--dsw-alias-label-secondary); font-size: 12px; line-height: 18px; }
+.probe,
+.success { display: flex; align-items: center; gap: 6px; padding: 0 14px 12px; color: var(--dsw-alias-label-secondary); font-size: 12px; line-height: 18px; }
+.success { color: var(--dsw-alias-state-success-primary); padding: 0; }
+.error { color: var(--dsw-alias-state-error-primary); font-size: 12px; line-height: 18px; }
+.notice { padding: 8px 12px; border: 0.5px solid var(--dsw-alias-border-l2); border-radius: var(--dsw-radius-md); }
+
+.editor { display: flex; flex-direction: column; gap: 16px; padding: 16px; border-top: 0.5px solid var(--dsw-alias-border-l2); background: var(--dsw-alias-bg-module-platform); }
+.editorTop { justify-content: space-between; }
+.editorTop h3 { margin: 0; font-size: 14px; line-height: 20px; }
+.editor fieldset { display: grid; gap: 12px; min-width: 0; padding: 0; border: 0; }
+.editor legend { padding: 0; color: var(--dsw-alias-label-secondary); font-size: 12px; font-weight: 500; line-height: 18px; }
+.grid { display: grid; grid-template-columns: 1fr; gap: 12px; }
+.field { display: grid; gap: 6px; min-width: 0; color: var(--dsw-alias-label-secondary); font-size: 12px; line-height: 18px; }
+.field input,
+.field select { box-sizing: border-box; width: 100%; min-height: 32px; border: 0.5px solid var(--dsw-alias-border-l3); border-radius: var(--dsw-radius-sm); background: var(--dsw-alias-settings-card-fill); color: var(--dsw-alias-label-primary); font: inherit; padding: 6px 8px; }
+.field input:focus-visible,
+.field select:focus-visible { outline: 2px solid var(--dsw-alias-state-business-primary); outline-offset: 1px; }
+.field small { color: var(--dsw-alias-label-tertiary); }
+.advanced { border-top: 0.5px solid var(--dsw-alias-border-l2); padding-top: 12px; }
+.advanced summary { width: fit-content; cursor: pointer; color: var(--dsw-alias-label-secondary); font-size: 12px; font-weight: 500; line-height: 18px; }
+.advanced .grid { margin-top: 12px; }
+.toggle { justify-content: space-between; color: var(--dsw-alias-label-secondary); font-size: 12px; line-height: 18px; }
+.actions { flex-wrap: wrap; justify-content: flex-end; }
+.remove { align-self: flex-start; color: var(--dsw-alias-state-error-primary); }
+
+@media (min-width: 560px) {
+  .grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .grid > :nth-child(1):last-child,
+  .field:has(input[id$="endpoint"]),
+  .field:has(input[id$="credential-reference"]),
+  .field:has(input[id$="allowed-path"]),
+  .field:has(input[id$="allowed-prefix"]),
+  .field:has(input[id$="known-hosts"]),
+  .field:has(input[id$="tls-ca-path"]) { grid-column: 1 / -1; }
+}
+
+@media (max-width: 559px) {
+  .header { align-items: flex-start; flex-direction: column; }
+  .cardHead { align-items: flex-start; flex-wrap: wrap; }
+  .disclosure { min-width: 180px; }
+  .actions > button:last-child { flex-basis: 100%; }
+}
