@@ -2699,12 +2699,12 @@ importers:
 
   packages/bundle/data-sources:
     dependencies:
-      '@deepseek-ai/schemastery':
-        specifier: link:../../../vendor/schemastery
-        version: link:../../../vendor/schemastery
       '@deepseek-ai/dsh-typert-protocol':
         specifier: workspace:*
         version: link:../../typert/protocol
+      '@deepseek-ai/schemastery':
+        specifier: link:../../../vendor/schemastery
+        version: link:../../../vendor/schemastery
     devDependencies:
       '@deepseek-ai/cordis':
         specifier: workspace:~
@@ -10149,7 +10149,7 @@ importers:
   packages/experimental/enterprise-runtime:
     dependencies:
       '@deepseek-ai/schemastery':
-        specifier: workspace:~
+        specifier: link:../../../vendor/schemastery
         version: link:../../../vendor/schemastery
       yauzl:
         specifier: ^3.4.0
@@ -10167,13 +10167,16 @@ importers:
       '@types/yauzl':
         specifier: ^2.10.3
         version: 2.10.3
-    peerDependencies:
+
+  packages/experimental/enterprise-runtime-bundle:
+    dependencies:
+      '@deepseek-ai/dsh-experimental-enterprise-runtime':
+        specifier: workspace:*
+        version: link:../enterprise-runtime
+    devDependencies:
       '@deepseek-ai/cordis':
         specifier: workspace:~
         version: link:../../../vendor/cordis
-      '@deepseek-ai/dsh-tools':
-        specifier: workspace:*
-        version: link:../../core/tools
 
   packages/experimental/forge:
     dependencies:
@@ -29329,7 +29332,6 @@ snapshots:
   '@types/yauzl@2.10.3':
     dependencies:
       '@types/node': 22.20.1
-    optional: true
 
   '@typescript-eslint/types@8.61.0': {}
 

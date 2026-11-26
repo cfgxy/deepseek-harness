@@ -443,6 +443,8 @@
     { "path": "./packages/experimental/auto-review" },
     { "path": "./packages/experimental/claude-code-mods" },
     { "path": "./packages/core/tools" },
+    { "path": "./packages/experimental/enterprise-runtime" },
+    { "path": "./packages/experimental/enterprise-runtime-bundle" },
     { "path": "./packages/core/tool-executor-native" },
     { "path": "./packages/core/tool-executor-ptc" },
     { "path": "./packages/core/agent-tool-presentation" },
