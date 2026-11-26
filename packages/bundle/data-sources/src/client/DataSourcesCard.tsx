@@ -22,6 +22,7 @@ type PendingAction =
   | { readonly type: 'open'; readonly source: DataSourceDraft }
   | { readonly type: 'add' }
   | { readonly type: 'kind'; readonly kind: DraftKind }
+  | { readonly type: 'remove' }
 
 /** Render one configured source without ever placing a credential value in the DOM. */
 export function DataSourcesCard(props: DataSourcesCardProps) {
@@ -71,6 +72,7 @@ export function DataSourcesCard(props: DataSourcesCardProps) {
       setAdvanced(false)
       return
     }
+    if (action.type === 'remove') { setConfirm('remove'); return }
     if (draft !== undefined) setDraft(replaceKind(draft, action.kind))
   }
   const request = (action: PendingAction): void => {
@@ -102,6 +104,11 @@ export function DataSourcesCard(props: DataSourcesCardProps) {
       setSelectedId(draft.id)
       setNotice(props.t('saved'))
     })
+  }
+  const requestRemove = (): void => {
+    if (draft === undefined || isNew) return
+    if (dirty) { setPendingAction({ type: 'remove' }); setConfirm('discard'); return }
+    setConfirm('remove')
   }
   const remove = (): void => {
     if (draft === undefined || isNew) return
@@ -154,10 +161,10 @@ export function DataSourcesCard(props: DataSourcesCardProps) {
             <Switch checked={source.enabled} label={`${source.label || source.id}: ${props.t('enabled')}`} disabled={disabled || (expanded && dirty)} title={expanded && dirty ? props.t('testDisabledDirty') : undefined} onChange={(enabled) => { void props.setEnabled(source.id, enabled) }} />
           </div>
           {!expanded && probe?.phase === 'success' ? <p className={styles.probe}><StateDot state="done" />{props.t('testSuccess')}</p> : null}
-          {expanded ? <Editor id={`data-source-editor-${source.id}`} isNew={false} {...{ draft, disabled, dirty, error, notice, validation, currentProbe, advanced, input, connection, update, changeKind, setAdvanced, save, close, remove, setConfirm, props }} /> : null}
+          {expanded ? <Editor id={`data-source-editor-${source.id}`} isNew={false} {...{ draft, disabled, dirty, error, notice, validation, currentProbe, advanced, input, connection, update, changeKind, setAdvanced, save, close, requestRemove, props }} /> : null}
         </article>
       })}
-      {draft !== undefined && isNew ? <article className={styles.card} role="listitem"><Editor id="data-source-editor-new" isNew {...{ draft, disabled, dirty, error, notice, validation, currentProbe, advanced, input, connection, update, changeKind, setAdvanced, save, close, remove, setConfirm, props }} /></article> : null}
+      {draft !== undefined && isNew ? <article className={styles.card} role="listitem"><Editor id="data-source-editor-new" isNew {...{ draft, disabled, dirty, error, notice, validation, currentProbe, advanced, input, connection, update, changeKind, setAdvanced, save, close, requestRemove, props }} /></article> : null}
     </div>
     <Modal open={confirm === 'discard'} title={props.t('discardTitle')} description={props.t('discardDescription')} closeLabel={props.t('close')} onClose={() => { setConfirm(undefined); setPendingAction(undefined) }} footer={<><Button data-modal-autofocus variant="outline" onClick={() => { setConfirm(undefined); setPendingAction(undefined) }}>{props.t('continueEditing')}</Button><Button variant="primary" onClick={() => { const action = pendingAction; setConfirm(undefined); setPendingAction(undefined); if (action !== undefined) execute(action); else { setSelectedId(undefined); setDraft(undefined); setBaseline(undefined); setError(undefined); setNotice(undefined) } }}>{props.t('discardChanges')}</Button></>} />
     <Modal open={confirm === 'remove'} title={props.t('removeTitle')} description={props.t('removeDescription')} closeLabel={props.t('close')} onClose={() => setConfirm(undefined)} footer={<><Button data-modal-autofocus variant="outline" onClick={() => setConfirm(undefined)}>{props.t('cancel')}</Button><Button variant="primary" onClick={remove}>{props.t('confirmRemove')}</Button></>} />
@@ -176,10 +183,10 @@ type EditorProps = {
   id: string; isNew: boolean; draft: DataSourceDraft; disabled: boolean; dirty: boolean; error?: string | undefined; notice?: string | undefined; validation?: string | undefined
   currentProbe?: { phase: 'idle' | 'pending' | 'success' | 'error'; message?: string | undefined } | undefined; advanced: boolean
   input: (name: string, label: string, value: string, onChange: (value: string) => void, options?: { type?: 'text' | 'number'; hint?: string }) => ReactElement
-  connection: ReactElement | null; update: (recipe: (source: DataSourceDraft) => DataSourceDraft) => void; changeKind: (kind: DraftKind) => void; setAdvanced: (value: boolean) => void; save: () => void; close: () => void; remove: () => void; setConfirm: (value: 'discard' | 'remove' | undefined) => void; props: DataSourcesCardProps
+  connection: ReactElement | null; update: (recipe: (source: DataSourceDraft) => DataSourceDraft) => void; changeKind: (kind: DraftKind) => void; setAdvanced: (value: boolean) => void; save: () => void; close: () => void; requestRemove: () => void; props: DataSourcesCardProps
 }
 
-function Editor({ id, isNew, draft, disabled, dirty, error, notice, validation, currentProbe, advanced, input, connection, update, changeKind, setAdvanced, save, close, setConfirm, props }: EditorProps) {
+function Editor({ id, isNew, draft, disabled, dirty, error, notice, validation, currentProbe, advanced, input, connection, update, changeKind, setAdvanced, save, close, requestRemove, props }: EditorProps) {
   const database = databaseKinds.includes(draft.kind as SourceKind)
   const directory = directoryKinds.includes(draft.kind as SourceKind)
   const testDisabled = disabled || dirty || !draft.enabled || draft.kind === ''
@@ -201,6 +208,6 @@ function Editor({ id, isNew, draft, disabled, dirty, error, notice, validation, 
     </>}
     {error === undefined && validation === undefined ? null : <p role="alert" className={styles.error}>{error ?? props.t('validationFailed')}</p>}{notice === undefined ? null : <p role="status" className={styles.success}><StateDot state="done" />{notice}</p>}{currentProbe === undefined ? null : <p role="status" className={styles.probe}><StateDot state={probeState(currentProbe.phase)} />{currentProbe.message}</p>}
     <div className={styles.actions}><Button variant="outline" disabled={disabled} onClick={close}>{props.t('cancel')}</Button><Button variant="outline" disabled={testDisabled} title={testTitle} onClick={() => props.test(draft.id)}>{currentProbe?.phase === 'pending' ? props.t('testing') : props.t('test')}</Button><Button variant="primary" disabled={disabled || validation !== undefined} type="submit">{disabled ? props.t('saving') : props.t('save')}</Button></div>
-    {!isNew ? <Button className={styles.remove} disabled={disabled} onClick={() => setConfirm('remove')}>{props.t('remove')}</Button> : null}
+    {!isNew ? <Button className={styles.remove} disabled={disabled} onClick={requestRemove}>{props.t('remove')}</Button> : null}
   </form>
 }

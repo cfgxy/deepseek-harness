@@ -159,6 +159,26 @@ it('requires confirmation before changing the type of a dirty draft', async () =
   await unmountAssembledApp()
 })
 
+it('requires confirmation before removing a dirty source', async () => {
+  mountAssembledApp({ additionalPlugins: [dataSourcesPlugin()], remote: { dataSources: { sources: [{
+    id: 'analytics', revision: '1', kind: 'postgresql', label: 'Analytics', enabled: true, credentialRef: 'DB_READONLY', connection: { host: 'analytics.example.test', database: 'analytics' }, policy: { maxBytes: 65536, maxRows: 100 },
+  }] } } })
+  await openDataSourcesSettings()
+  fireEvent.click(screen.getByRole('button', { name: /Analytics/ }))
+  fireEvent.change(input('label'), { target: { value: 'Unsaved analytics' } })
+  fireEvent.click(screen.getByRole('button', { name: 'Remove source' }))
+  expect(screen.getByRole('dialog', { name: 'Discard unsaved changes?' })).not.toBeNull()
+  fireEvent.click(screen.getByRole('button', { name: 'Keep editing' }))
+  expect(input('label').value).toBe('Unsaved analytics')
+  expect(screen.queryByRole('dialog', { name: 'Remove data source?' })).toBeNull()
+  fireEvent.click(screen.getByRole('button', { name: 'Remove source' }))
+  fireEvent.click(screen.getByRole('button', { name: 'Discard changes' }))
+  const removeDialog = await screen.findByRole('dialog', { name: 'Remove data source?' })
+  await waitFor(() => { expect(document.activeElement).toBe(within(removeDialog).getByRole('button', { name: 'Cancel' })) })
+  fireEvent.click(within(removeDialog).getByRole('button', { name: 'Cancel' }))
+  await unmountAssembledApp()
+})
+
 it('does not offer writes to a read-only settings document', async () => {
   const remote = mountAssembledApp({ additionalPlugins: [dataSourcesPlugin()], remote: { dataSources: { writable: false } } })
   await openDataSourcesSettings()
