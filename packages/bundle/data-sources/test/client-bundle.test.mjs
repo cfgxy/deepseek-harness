@@ -30,10 +30,11 @@ test('client registers a credential-safe settings page and releases every lifeti
   const writes = []
   const cleanups = []
   const registrations = []
+  let revision = 1
   const scope = {
     getSnapshot() {
       return {
-        status: 'ready', writable: true, value: {
+        status: 'ready', writable: true, revision, value: {
           sources: [{
             id: 'fixture', revision: '1', kind: 'mysql', label: 'Fixture DB', credentialRef: 'DB_READONLY',
             connection: {
@@ -47,7 +48,7 @@ test('client registers a credential-safe settings page and releases every lifeti
       }
     },
     subscribe() { return () => { scopeDisposed += 1 } },
-    async mutate(ops) { writes.push(ops); return true },
+    async mutate(ops, expectedRevision) { assert.equal(expectedRevision, revision); writes.push(ops); revision += 1; return true },
   }
   let remoteDisposed = 0
   let injectedDisposed = 0
@@ -90,8 +91,11 @@ test('client registers a credential-safe settings page and releases every lifeti
   for (const secret of ['must-not-render', 'token-value', 'api-key-value', 'authorization-value', 'key-material-value', 'neutral-secret-value']) {
     assert.doesNotMatch(JSON.stringify(rendered), new RegExp(secret))
   }
-  face.save({ ...state.sources[0], label: 'Renamed fixture' })
-  await new Promise(resolve => setImmediate(resolve))
+  assert.equal(await face.save({ ...state.sources[0], label: 'Renamed fixture' }, state.scopeRevision), 'saved')
+  const writesBeforeConflict = writes.length
+  revision += 1
+  assert.equal(await face.save({ ...state.sources[0], label: 'Stale fixture' }, state.scopeRevision), 'conflict')
+  assert.equal(writes.length, writesBeforeConflict)
   const saved = JSON.stringify(writes)
   assert.doesNotMatch(saved, /rejectUnauthorized/)
   for (const secret of ['must-not-render', 'token-value', 'api-key-value', 'authorization-value', 'key-material-value', 'neutral-secret-value']) {

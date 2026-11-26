@@ -38,10 +38,16 @@ export interface DataSourceDraft {
 interface DataSourcesSettings { sources?: unknown }
 export type ProbeState = { phase: 'idle' | 'pending' | 'success' | 'error'; message?: string }
 
+export type SaveResult = 'saved' | 'conflict' | 'failed'
+
 export interface DataSourcesCardState {
   available: boolean
   writable: boolean
   saving: boolean
+  /** Identifies the live controller; drafts must not cross controller lifetimes. */
+  controllerId: number
+  /** The Host configuration revision on which the projected sources are based. */
+  scopeRevision: number
   sources: readonly DataSourceDraft[]
   probes: Readonly<Record<string, ProbeState>>
 }
@@ -49,13 +55,14 @@ export interface DataSourcesCardState {
 export interface DataSourcesCardFace {
   hooks: { dataSourcesSettings: SnapshotStore<DataSourcesCardState> }
   create: () => DataSourceDraft
-  save: (source: DataSourceDraft) => Promise<boolean>
+  save: (source: DataSourceDraft, expectedScopeRevision: number) => Promise<SaveResult>
   remove: (sourceId: string) => Promise<boolean>
   setEnabled: (sourceId: string, enabled: boolean) => Promise<boolean>
   test: (sourceId: string) => void
 }
 
 const kinds: readonly SourceKind[] = ['local-directory', 's3', 'sftp', 'smb', 'nfs', 'ftp', 'webdav', 'mysql', 'postgresql']
+let nextControllerId = 1
 const directoryKinds: readonly SourceKind[] = ['local-directory', 'smb', 'nfs', 'sftp', 'ftp', 'webdav']
 const databaseKinds: readonly SourceKind[] = ['mysql', 'postgresql']
 const text = (value: unknown): string => typeof value === 'string' ? value : ''
@@ -166,6 +173,7 @@ function draftSignature(source: DataSourceDraft): string { return JSON.stringify
 export class DataSourcesSettingsController {
   private readonly store: SnapshotStore<DataSourcesCardState>
   private readonly unsubscribe: () => void
+  private readonly controllerId = nextControllerId++
   private disposed = false
   private saving = false
   private nextId = 1
@@ -184,19 +192,24 @@ export class DataSourcesSettingsController {
     }) : []
   }
 
+  private scopeRevision(): number { return this.scope.getSnapshot().revision ?? 0 }
+
   private projection(): DataSourcesCardState {
     const snapshot = this.scope.getSnapshot()
-    return { available: snapshot.status === 'ready', writable: snapshot.writable, saving: this.saving, sources: this.sources(), probes: this.probes }
+    return { available: snapshot.status === 'ready', writable: snapshot.writable, saving: this.saving, controllerId: this.controllerId, scopeRevision: snapshot.revision ?? 0, sources: this.sources(), probes: this.probes }
   }
 
   private publish(): void { if (!this.disposed) this.store.set(this.projection()) }
 
-  private async write(sources: readonly DataSourceDraft[]): Promise<boolean> {
-    if (this.saving || !this.scope.getSnapshot().writable) return false
+  private async write(sources: readonly DataSourceDraft[], expectedScopeRevision: number): Promise<SaveResult> {
+    const snapshot = this.scope.getSnapshot()
+    if (this.saving || !snapshot.writable) return 'failed'
+    // Never replace an external update with a draft based on an older snapshot.
+    if ((snapshot.revision ?? 0) !== expectedScopeRevision) return 'conflict'
     this.saving = true
     this.publish()
     try {
-      return await this.scope.mutate([{ op: 'set', path: ['sources'], value: sources.map(serialise) }], this.scope.getSnapshot().revision)
+      return await this.scope.mutate([{ op: 'set', path: ['sources'], value: sources.map(serialise) }], expectedScopeRevision) ? 'saved' : 'conflict'
     } finally {
       this.saving = false
       this.publish()
@@ -208,23 +221,24 @@ export class DataSourcesSettingsController {
     this.probes = remaining
   }
 
-  private save(source: DataSourceDraft): Promise<boolean> {
+  private save(source: DataSourceDraft, expectedScopeRevision: number): Promise<SaveResult> {
+    if (this.scopeRevision() !== expectedScopeRevision) return Promise.resolve('conflict')
     const existing = this.sources()
     const sources = existing.some(current => current.id === source.id)
       ? existing.map(current => current.id === source.id ? source : current)
       : [...existing, source]
     this.clearProbe(source.id)
-    return this.write(sources)
+    return this.write(sources, expectedScopeRevision)
   }
 
   private remove(sourceId: string): Promise<boolean> {
     this.clearProbe(sourceId)
-    return this.write(this.sources().filter(source => source.id !== sourceId))
+    return this.write(this.sources().filter(source => source.id !== sourceId), this.scopeRevision()).then(result => result === 'saved')
   }
 
   private setEnabled(sourceId: string, enabled: boolean): Promise<boolean> {
     this.clearProbe(sourceId)
-    return this.write(this.sources().map(source => source.id === sourceId ? { ...source, enabled } : source))
+    return this.write(this.sources().map(source => source.id === sourceId ? { ...source, enabled } : source), this.scopeRevision()).then(result => result === 'saved')
   }
 
   private create(): DataSourceDraft {
@@ -263,7 +277,7 @@ export class DataSourcesSettingsController {
     return {
       hooks: { dataSourcesSettings: this.store },
       create: () => this.create(),
-      save: source => this.save(source),
+      save: (source, expectedScopeRevision) => this.save(source, expectedScopeRevision),
       remove: sourceId => this.remove(sourceId),
       setEnabled: (sourceId, enabled) => this.setEnabled(sourceId, enabled),
       test: (sourceId) => { this.test(sourceId) },
