@@ -81,7 +81,18 @@ export function SignInDialog({ account, colorScheme, start, cancel, close, useAp
       await panuoyun.configure(mode, origin)
       await panuoyun.login(email, password)
       setPassword('')
-      setGroups(await panuoyun.groups())
+      const availableGroups = await panuoyun.groups()
+      setGroups(availableGroups)
+      if (mode === 'personal' || availableGroups.length === 0) {
+        try {
+          await panuoyun.createApiKey('DeepSeek Harness')
+          close()
+          return
+        } catch {
+          setPanuoyunStep('key')
+          return
+        }
+      }
       setPanuoyunStep('key')
     })
   }
@@ -119,10 +130,15 @@ export function SignInDialog({ account, colorScheme, start, cancel, close, useAp
       {error && <p role="alert">{t(failureKey)}</p>}
     </div>
     <div className={css.actions}>
-      <Button variant="outline" className={css.secondaryButton} disabled={busy} onClick={signOutPanuoyun}>{t('panuoyunSignOut')}</Button>
-      <Button variant="outline" className={css.secondaryButton} disabled={busy} onClick={() => { setRoute('deepseek'); setFailed(false) }}>{t('deepSeekAccount')}</Button>
-      <Button variant="outline" className={css.secondaryButton} disabled={busy} onClick={selectApiKey}>{t('addApiKey')}</Button>
+      <Button variant="outline" className={css.secondaryButton} disabled={busy} onClick={dismiss}>{t('cancel')}</Button>
       <Button variant="primary" className={css.primaryButton} disabled={busy || email.length === 0 || password.length === 0 || (mode === 'enterprise' && origin.length === 0)} onClick={loginPanuoyun}>{t('signIn')}</Button>
+    </div>
+    <div className={css.footerLinks}>
+      <button type="button" className={css.linkText} disabled={busy} onClick={signOutPanuoyun}>{t('panuoyunSignOut')}</button>
+      <span className={css.footerDivider}>|</span>
+      <button type="button" className={css.linkText} disabled={busy} onClick={() => { setRoute('deepseek'); setFailed(false) }}>{t('deepSeekAccount')}</button>
+      <span className={css.footerDivider}>|</span>
+      <button type="button" className={css.linkText} disabled={busy} onClick={selectApiKey}>{t('addApiKey')}</button>
     </div>
   </> : <>
     <p className={css.description}>{t('panuoyunKeyDescription')}</p>
@@ -137,6 +153,11 @@ export function SignInDialog({ account, colorScheme, start, cancel, close, useAp
       <Button variant="outline" className={css.secondaryButton} disabled={busy} onClick={signOutPanuoyun}>{t('panuoyunSignOut')}</Button>
       <Button variant="outline" className={css.secondaryButton} disabled={busy} onClick={() => { finishPanuoyun(() => panuoyun.createApiKey('DeepSeek Harness', groupId === '' ? undefined : Number(groupId))) }}>{t('panuoyunCreateKey')}</Button>
       <Button variant="primary" className={css.primaryButton} disabled={busy || apiKey.length === 0} onClick={() => { finishPanuoyun(() => panuoyun.selectApiKey(apiKey)) }}>{t('panuoyunContinue')}</Button>
+    </div>
+    <div className={css.footerLinks}>
+      <button type="button" className={css.linkText} disabled={busy} onClick={() => { setRoute('deepseek'); setFailed(false) }}>{t('deepSeekAccount')}</button>
+      <span className={css.footerDivider}>|</span>
+      <button type="button" className={css.linkText} disabled={busy} onClick={selectApiKey}>{t('addApiKey')}</button>
     </div>
   </>
   return <Modal open headless title={title} onClose={dismiss} className={css.dialog as string}>
@@ -156,15 +177,18 @@ export function SignInDialog({ account, colorScheme, start, cancel, close, useAp
         {error ? t(failureKey) : expired ? t('timeoutDescription') : t('loginDescription')}
       </p>}
     </div>
-    {(route !== 'panuoyun' || active) && <div className={css.actions}>
-      <Button variant="outline" className={css.secondaryButton} disabled={committing || busy}
-        onClick={active ? dismiss : selectApiKey}>{t(active ? 'cancel' : 'addApiKey')}</Button>
-      {route === 'deepseek' && !active && panuoyun !== undefined && <Button variant="outline" className={css.secondaryButton}
-        onClick={selectPanuoyun}>{t('panuoyunTitle')}</Button>}
-      <Button variant="primary" className={css.primaryButton} disabled={busy || committing || waiting || account.view === undefined}
-        aria-label={waiting ? t('waiting') : undefined} onClick={() => { void run(retry) }}>
-        {waiting ? <IconLoadingOutlineRegular className={css.spinner} /> : t(expired || error ? 'retry' : 'signIn')}
-      </Button>
-    </div>}
+    {(route !== 'panuoyun' || active) && <>
+      <div className={css.actions}>
+        <Button variant="outline" className={css.secondaryButton} disabled={committing || busy}
+          onClick={active ? dismiss : selectApiKey}>{t(active ? 'cancel' : 'addApiKey')}</Button>
+        <Button variant="primary" className={css.primaryButton} disabled={busy || committing || waiting || account.view === undefined}
+          aria-label={waiting ? t('waiting') : undefined} onClick={() => { void run(retry) }}>
+          {waiting ? <IconLoadingOutlineRegular className={css.spinner} /> : t(expired || error ? 'retry' : 'signIn')}
+        </Button>
+      </div>
+      {route === 'deepseek' && !active && panuoyun !== undefined && <div className={css.footerLinks}>
+        <button type="button" className={css.linkText} onClick={selectPanuoyun}>{t('panuoyunTitle')}</button>
+      </div>}
+    </>}
   </Modal>
 }

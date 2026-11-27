@@ -227,6 +227,10 @@ export function DataSourcesCard(props: DataSourcesCardProps) {
       ? input('host', props.t('host'), draft.connection.host, value => (
         update(source => ({ ...source, connection: { ...source.connection, host: value } }))
       )) : null}
+    {['sftp', 'ftp', 'mysql', 'postgresql'].includes(draft.kind)
+      ? input('port', props.t('port'), draft.connection.port, value => (
+        update(source => ({ ...source, connection: { ...source.connection, port: value } }))
+      ), { type: 'number' }) : null}
     {databaseKinds.includes(draft.kind as SourceKind)
       ? input('database', props.t('database'), draft.connection.database, value => (
         update(source => ({ ...source, connection: { ...source.connection, database: value } }))
@@ -772,11 +776,6 @@ function Editor({
         <details className={styles.advanced} open={advanced} onToggle={event => setAdvanced(event.currentTarget.open)}>
           <summary>{props.t('advanced')}</summary>
           <div className={styles.grid}>
-            {['sftp', 'ftp', 'mysql', 'postgresql'].includes(draft.kind) ? (
-              input('port', props.t('port'), draft.connection.port, value => (
-                update(source => ({ ...source, connection: { ...source.connection, port: value } }))
-              ), { type: 'number' })
-            ) : null}
             {input('timeout', props.t('timeoutMs'), draft.connection.timeoutMs, value => (
               update(source => ({ ...source, connection: { ...source.connection, timeoutMs: value } }))
             ), { type: 'number' })}

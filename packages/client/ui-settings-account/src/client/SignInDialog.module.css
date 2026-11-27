@@ -6,10 +6,17 @@
 @media (hover: hover) {
   .close:hover { background: var(--dsw-alias-interactive-bg-hover); }
 }
-.actions { box-sizing: border-box; display: flex; justify-content: flex-end; align-items: center; width: 100%; padding: 0 24px; gap: 8px; }
-.primaryButton, .secondaryButton { box-sizing: border-box; min-width: 72px; height: 36px; border-radius: var(--dsw-radius-md); font-size: 14px; line-height: 22px; }
+.actions { box-sizing: border-box; display: flex; justify-content: flex-end; align-items: center; width: 100%; padding: 16px 24px 0; gap: 8px; }
+.primaryButton, .secondaryButton { box-sizing: border-box; min-width: 72px; height: 36px; border-radius: var(--dsw-radius-md); font-size: 14px; line-height: 22px; white-space: nowrap; }
 .primaryButton { padding: 0 16px; font-weight: 500; }
 .secondaryButton { padding: 0 14px; --dsh-button-outline-color: var(--dsw-alias-border-l2); }
+.footerLinks { box-sizing: border-box; display: flex; align-items: center; justify-content: flex-end; gap: 8px; padding: 12px 24px 16px; font-size: 12px; line-height: 18px; }
+.linkText { border: 0; padding: 0; background: transparent; color: var(--dsw-alias-label-secondary, #8c8c8c); font-size: 12px; line-height: 18px; cursor: pointer; text-decoration: none; }
+@media (hover: hover) {
+  .linkText:hover:not(:disabled) { color: var(--dsw-alias-interactive-primary, #1890ff); text-decoration: underline; }
+}
+.linkText:disabled { opacity: 0.5; cursor: not-allowed; }
+.footerDivider { color: var(--dsw-alias-border-l2, #d9d9d9); user-select: none; font-size: 12px; }
 .description { margin: 0; padding: 0 24px; font-size: 14px; line-height: 22px; color: var(--dsw-alias-label-primary); }
 .link { border: 0; padding: 0; background: transparent; color: inherit; font: inherit; text-decoration: underline; cursor: pointer; }
 .form { display: flex; flex-direction: column; gap: 12px; padding: 16px 24px 0; color: var(--dsw-alias-label-primary); font-size: 14px; line-height: 22px; }

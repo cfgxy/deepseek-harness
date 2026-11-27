@@ -46,6 +46,22 @@ it('defaults to Pa诺云 and creates a dedicated group key without listing keys'
   expect(document.body.textContent).not.toContain('password-secret')
   expect(screen.queryByText(/key list/i)).toBeNull()
 })
+it('automatically creates a dedicated key on personal sign in and closes dialog', async () => {
+  const panuoyun = {
+    configure: vi.fn(async () => {}), login: vi.fn(async () => {}),
+    groups: vi.fn(async () => []),
+    selectApiKey: vi.fn(async () => {}), createApiKey: vi.fn(async () => {}), signOut: vi.fn(async () => {}),
+  }
+  const props = dialogProps(null)
+  render(<SignInDialog {...props} panuoyun={panuoyun} />)
+  fireEvent.change(screen.getByLabelText(en.panuoyunEmail), { target: { value: 'member@example.com' } })
+  fireEvent.change(screen.getByLabelText(en.panuoyunPassword), { target: { value: 'password-secret' } })
+  fireEvent.click(screen.getByRole('button', { name: en.signIn }))
+  await waitFor(() => { expect(panuoyun.configure).toHaveBeenCalledWith('personal', '') })
+  expect(panuoyun.login).toHaveBeenCalledWith('member@example.com', 'password-secret')
+  await waitFor(() => { expect(panuoyun.createApiKey).toHaveBeenCalledWith('DeepSeek Harness') })
+  expect(props.close).toHaveBeenCalledOnce()
+})
 it('switches from DeepSeek back to Pa诺云 in the same dialog after an abandoned route', () => {
   const panuoyun = {
     configure: vi.fn(async () => {}), login: vi.fn(async () => {}), groups: vi.fn(async () => []),

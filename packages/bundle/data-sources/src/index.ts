@@ -154,8 +154,8 @@ export class DataSourcesRemote extends TypertRemoteService {
       const result = await this.supervisor.probe(request.sourceId)
       signal.throwIfAborted()
       return { ok: true, source: result.source, connector: result.connector, observedAt: result.observedAt }
-    } catch {
-      return { ok: false, message: 'Connection test failed.' }
+    } catch (error) {
+      return { ok: false, message: error instanceof Error ? error.message : 'Connection test failed.' }
     }
   }
 
