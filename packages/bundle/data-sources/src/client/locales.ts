@@ -10,6 +10,10 @@ export type DataSourcesLocaleKey =
   | 'envBannerTitle' | 'envBannerDesc' | 'envMissingTag' | 'envUvFound' | 'installEnv' | 'installingEnv' | 'envReady' | 'reloadMcp' | 'reloadingMcp'
   | 'panel' | 'pageTitle' | 'pageSubtitle'
   | 'credentialGuideTitle' | 'credentialGuideDesc'
+  | 'authMode' | 'authModeDirect' | 'authModeReference' | 'username' | 'password' | 'accessKeyId' | 'secretAccessKey' | 'privateKey'
+  | 'selectCredential' | 'selectCredentialPlaceholder' | 'customCredentialOption' | 'createCredentialBtn' | 'deleteCredentialBtn'
+  | 'createCredentialTitle' | 'credentialNameLabel' | 'credentialValueLabel' | 'confirmCreate' | 'credentialCreated' | 'credentialDeleted'
+  | 'confirmDeleteCredential' | 'confirmDeleteCredentialDesc'
 
 export const en: Record<DataSourcesLocaleKey, string> = {
   panel: 'Data sources', pageTitle: 'Data sources', pageSubtitle: 'Reads only from the scope you specify. Source data is never changed.',
@@ -26,6 +30,13 @@ export const en: Record<DataSourcesLocaleKey, string> = {
   typeRequired: 'Select a source type.', sourceType: 'Source type', selectType: 'Select a type', localGroup: 'Local & mounted folders', objectGroup: 'Object storage', remoteGroup: 'Remote files', databaseGroup: 'Read-only databases', ftpWarning: 'FTP is unencrypted. Prefer SFTP when possible.', mountedHint: 'Mount the share on the host before entering its path.', databaseHint: 'Use a database account with read-only permissions.', validationFailed: 'Review the highlighted fields.', saveFailed: 'Couldn’t save. Your changes were kept.', saveConflict: 'This source changed in another window. Your changes were kept; reload the latest settings before saving.', updating: 'Updating…', probeIdle: 'Not tested',
   envBannerTitle: 'Python / uv Environment', envBannerDesc: 'Optional Python & uv environment for advanced database queries and MCP bridge tools. Can be installed automatically using domestic mirrors.',
   envMissingTag: 'Not Ready', envUvFound: 'uv Detected', installEnv: 'Install Python / uv', installingEnv: 'Installing from China mirrors…', envReady: 'Python / uv & MCP ready', reloadMcp: 'Reload MCP', reloadingMcp: 'Reloading…',
+  authMode: 'Authentication mode', authModeDirect: 'Direct credentials', authModeReference: 'Reference saved credential',
+  username: 'Username', password: 'Password', accessKeyId: 'Access Key ID', secretAccessKey: 'Secret Access Key', privateKey: 'SSH Private Key',
+  selectCredential: 'Host credential', selectCredentialPlaceholder: '-- Select from host credentials --', customCredentialOption: 'Custom reference name…',
+  createCredentialBtn: '+ New credential', deleteCredentialBtn: 'Delete credential',
+  createCredentialTitle: 'Create host credential', credentialNameLabel: 'Credential name (Ref)', credentialValueLabel: 'Credential payload (JSON or text)',
+  confirmCreate: 'Save credential', credentialCreated: 'Credential saved to host.', credentialDeleted: 'Credential removed from host.',
+  confirmDeleteCredential: 'Delete host credential?', confirmDeleteCredentialDesc: 'This credential will be removed from ~/.dsh/.credentials.yaml. Any source using it may fail to connect.',
 }
 
 export const zh: Record<DataSourcesLocaleKey, string> = {
@@ -43,4 +54,11 @@ export const zh: Record<DataSourcesLocaleKey, string> = {
   typeRequired: '请选择数据源类型。', sourceType: '数据源类型', selectType: '选择类型', localGroup: '本地与挂载目录', objectGroup: '对象存储', remoteGroup: '远程文件', databaseGroup: '只读数据库', ftpWarning: 'FTP 不加密；优先使用 SFTP。', mountedHint: '先在宿主机挂载，再填写挂载路径。', databaseHint: '请使用仅有读取权限的数据库账号。', validationFailed: '请检查标记的字段。', saveFailed: '未能保存，已保留更改。', saveConflict: '此数据源已在另一窗口更改。已保留你的更改；请重新加载最新设置后再保存。', updating: '更新中…', probeIdle: '尚未测试',
   envBannerTitle: 'Python / uv 运行环境', envBannerDesc: '只读数据源的高级查询（如数据库与 MCP 服务）需要 Python 与 uv 支持。可从国内镜像源快速一键安装与配置。',
   envMissingTag: '未就绪', envUvFound: '已检测到 uv', installEnv: '一键安装 Python / uv', installingEnv: '正在从国内镜像源安装…', envReady: 'Python / uv 环境与 MCP 服务已就绪', reloadMcp: '重新加载 MCP', reloadingMcp: '正在重新加载…',
+  authMode: '认证配置方式', authModeDirect: '直接配置（明文输入）', authModeReference: '选择已有凭据引用',
+  username: '用户名', password: '密码', accessKeyId: 'Access Key ID', secretAccessKey: 'Secret Access Key', privateKey: 'SSH 私钥',
+  selectCredential: '选择宿主机已有凭据', selectCredentialPlaceholder: '-- 从已有凭据中选择 --', customCredentialOption: '手动输入引用名…',
+  createCredentialBtn: '+ 新建凭据', deleteCredentialBtn: '删除凭据',
+  createCredentialTitle: '新建宿主机凭据', credentialNameLabel: '凭据名称（Ref）', credentialValueLabel: '凭据内容 (JSON / 文本)',
+  confirmCreate: '保存到宿主机', credentialCreated: '凭据已保存到宿主机。', credentialDeleted: '凭据已从宿主机删除。',
+  confirmDeleteCredential: '确定删除宿主机凭据？', confirmDeleteCredentialDesc: '将从 ~/.dsh/.credentials.yaml 中删除此凭据，其他引用该凭据的数据源可能连接失败。',
 }

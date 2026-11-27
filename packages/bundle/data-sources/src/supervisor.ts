@@ -99,6 +99,14 @@ export class ConnectorSupervisor {
     }))
   }
 
+  credentialRefs(): string[] {
+    const refs: string[] = []
+    for (const source of this.#sources.values()) {
+      if (source.credentialRef) refs.push(source.credentialRef)
+    }
+    return refs
+  }
+
   inspect(sourceId: string): Pick<SourceConfig, 'id' | 'revision' | 'kind' | 'label' | 'enabled'> & { queryAlias?: string; policy: Pick<SourcePolicy, 'maxBytes' | 'maxRows'> } {
     const source = this.#source(sourceId)
     return {
