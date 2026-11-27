@@ -52,7 +52,7 @@ export interface EnvStatusState {
 }
 
 interface DataSourcesRemoteClient {
-  probe: (request: { sourceId: string }) => Promise<{ ok: boolean; value: { ok: boolean } }>
+  probe: (request: { sourceId: string }) => Promise<{ ok: boolean; value: { ok: boolean; message?: string } }>
   checkEnvironment?: () => Promise<{ ok: boolean; value: { hasUv: boolean; hasPython: boolean; mcpRunning: boolean } }>
   installEnvironment?: () => Promise<{ ok: boolean; value: { ok: boolean; message: string } }>
   reloadMcp?: () => Promise<{ ok: boolean; value: { ok: boolean; message: string } }>
@@ -323,7 +323,11 @@ export class DataSourcesSettingsController {
     void this.ctx.remote.dataSources.probe({ sourceId }).then((response) => {
       const current = this.sources().find(candidate => candidate.id === sourceId)
       if (current === undefined || !current.enabled || draftSignature(current) !== signature) return
-      const message = response.ok && response.value.ok ? 'Connection succeeded.' : 'Connection test failed. Check the connection settings and the credential reference on the host.'
+      const message = response.ok && response.value.ok
+        ? 'Connection succeeded.'
+        : (response.ok && response.value?.message
+          ? response.value.message
+          : 'Connection test failed. Check the connection settings and the credential reference on the host.')
       this.probes = { ...this.probes, [sourceId]: { phase: response.ok && response.value.ok ? 'success' : 'error', message } }
       this.publish()
     }, () => {
