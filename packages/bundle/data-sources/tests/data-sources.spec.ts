@@ -152,6 +152,75 @@ describe('read-only data source supervisor', () => {
     }
   })
 
+  it('lists, saves, and deletes credentials via DataSourcesRemote with validation', async () => {
+    const tempHome = await mkdtemp(join(tmpdir(), 'dsh-data-source-creds-'))
+    const oldDshHome = process.env.DSH_HOME
+    process.env.DSH_HOME = tempHome
+    const ctx = new Context()
+    const stored = new Map<string, string>()
+    ctx.provide('credentials', {
+      resolve: async () => undefined,
+      describe: async (ref: string) => ({
+        configured: stored.has(ref) || ref === 'EXISTING_REF',
+        source: 'local',
+        writable: true,
+      }),
+      set: async (ref: string, value: string) => {
+        stored.set(ref, value)
+      },
+      unset: async (ref: string) => {
+        stored.delete(ref)
+      },
+    } as never)
+
+    try {
+      await writeFile(join(tempHome, '.credentials.yaml'), 'version: 1\nrefs:\n  EXISTING_REF: "secret"\n')
+      const configured: SourceConfig = {
+        ...source('mysql'),
+        credentialRef: 'ACTIVE_DB_REF',
+      }
+      const remote = new DataSourcesRemote(
+        ctx,
+        new ConnectorSupervisor([configured], [connector('mysql')], { resolve: async () => undefined }),
+      )
+
+      // listCredentials includes .credentials.yaml refs and supervisor credential refs
+      const listRes = await remote.listCredentials(AbortSignal.timeout(1_000))
+      expect(listRes.ok).toBe(true)
+      expect(listRes.credentials.some(c => c.ref === 'EXISTING_REF')).toBe(true)
+      expect(listRes.credentials.some(c => c.ref === 'ACTIVE_DB_REF')).toBe(true)
+
+      // saveCredential validation: invalid ref name
+      const invalidRefRes = await remote.saveCredential({ ref: '123_INVALID', value: 'foo' }, AbortSignal.timeout(1_000))
+      expect(invalidRefRes.ok).toBe(false)
+      expect(invalidRefRes.message).toContain('必须由英文字母')
+
+      // saveCredential validation: empty value
+      const emptyValRes = await remote.saveCredential({ ref: 'VALID_REF', value: '' }, AbortSignal.timeout(1_000))
+      expect(emptyValRes.ok).toBe(false)
+      expect(emptyValRes.message).toContain('不能为空')
+
+      // saveCredential success
+      const saveRes = await remote.saveCredential({ ref: 'VALID_REF', value: '{"secret":"123"}' }, AbortSignal.timeout(1_000))
+      expect(saveRes.ok).toBe(true)
+      expect(stored.get('VALID_REF')).toBe('{"secret":"123"}')
+
+      // deleteCredential validation: invalid ref
+      const deleteInvalid = await remote.deleteCredential({ ref: '123_INVALID' }, AbortSignal.timeout(1_000))
+      expect(deleteInvalid.ok).toBe(false)
+
+      // deleteCredential success
+      const deleteRes = await remote.deleteCredential({ ref: 'VALID_REF' }, AbortSignal.timeout(1_000))
+      expect(deleteRes.ok).toBe(true)
+      expect(stored.has('VALID_REF')).toBe(false)
+    } finally {
+      if (oldDshHome === undefined) delete process.env.DSH_HOME
+      else process.env.DSH_HOME = oldDshHome
+      await ctx.fiber.dispose()
+      await rm(tempHome, { recursive: true, force: true })
+    }
+  })
+
   it('projects source inspection without connection coordinates or allowed roots', () => {
     const configured: SourceConfig = {
       ...source('s3'), credentialRef: 'DATA_SOURCE_TEST',

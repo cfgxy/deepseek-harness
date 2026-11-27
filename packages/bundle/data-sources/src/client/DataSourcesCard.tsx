@@ -1,4 +1,4 @@
-/* oxlint-disable @stylistic/max-len, @stylistic/member-delimiter-style -- dense JSX keeps each field's allowlisted write adjacent to its control. */
+/* oxlint-disable @stylistic/max-len -- dense JSX keeps each field's allowlisted write adjacent to its control. */
 import { useEffect, useMemo, useRef, useState } from 'react'
 import type { ReactElement } from 'react'
 import { Button, Modal, StateDot, Switch, Tag } from '@deepseek-ai/dsh-client-ui-primitives'
@@ -10,6 +10,7 @@ export type DataSourcesCardProps = PropsRuntime<'plugins.item'> & PropsLocale<'s
 
 const databaseKinds: readonly SourceKind[] = ['mysql', 'postgresql']
 const directoryKinds: readonly SourceKind[] = ['local-directory', 'smb', 'nfs', 'sftp', 'ftp', 'webdav']
+const noAuthKinds: readonly SourceKind[] = ['local-directory', 'smb', 'nfs']
 
 function copy(source: DataSourceDraft): DataSourceDraft { return structuredClone(source) }
 function detailKind(kind: DraftKind): string { return kind === '' ? '' : kind }
@@ -438,6 +439,12 @@ function Editor({
   const [isCustomRef, setIsCustomRef] = useState(() => (
     Boolean(draft.credentialRef && !credentials.some(c => c.ref === draft.credentialRef))
   ))
+
+  useEffect(() => {
+    if (draft.credentialRef && credentials.some(c => c.ref === draft.credentialRef)) {
+      setIsCustomRef(false)
+    }
+  }, [credentials, draft.credentialRef])
   const [showCreateModal, setShowCreateModal] = useState(false)
   const [newCredRef, setNewCredRef] = useState('')
   const [newCredValue, setNewCredValue] = useState('')
@@ -489,7 +496,7 @@ function Editor({
     setInternalError(undefined)
     try {
       let targetDraft = draft
-      if (draft.kind !== 'local-directory' && authMode === 'direct') {
+      if (!noAuthKinds.includes(draft.kind as SourceKind) && authMode === 'direct') {
         const hasDirectValues = (draft.kind === 's3' && (directAccessKeyId || directSecretAccessKey))
           || (draft.kind === 'sftp' && (directUsername || directPassword || directPrivateKey))
           || (['mysql', 'postgresql', 'ftp', 'webdav'].includes(draft.kind) && (directUsername || directPassword))
@@ -569,7 +576,7 @@ function Editor({
             <div className={styles.grid}>{connection}</div>
           </fieldset>
         )}
-        {draft.kind === 'local-directory' ? null : (
+        {noAuthKinds.includes(draft.kind as SourceKind) ? null : (
           <fieldset>
             <legend>{props.t('authMode')}</legend>
             <div className={styles.authModeToggle}>
