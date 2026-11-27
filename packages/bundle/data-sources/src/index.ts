@@ -1,10 +1,12 @@
+import { readFile } from 'node:fs/promises'
+import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import type { Context, Fiber, Volatile } from '@deepseek-ai/cordis'
 import z from '@deepseek-ai/schemastery'
 import * as McpClient from '@deepseek-ai/dsh-mcp-client'
 import { createMcpToolDefinition } from '@deepseek-ai/dsh-mcp-client'
 import { Remote, TypertRemoteService } from '@deepseek-ai/dsh-typert-protocol'
-import type {} from '@deepseek-ai/dsh-credentials'
+import { credentialRef, isCredentialRefName } from '@deepseek-ai/dsh-credentials'
 import type {} from '@deepseek-ai/dsh-tools'
 import { LocalDirectoryConnector } from './local-directory.ts'
 import { S3Connector } from './s3.ts'
@@ -16,7 +18,14 @@ import { MysqlConnector } from './mysql.ts'
 import { PostgreSqlConnector } from './postgresql.ts'
 import { ConnectorSupervisor } from './supervisor.ts'
 import { DataSourcesBroker, type BrokerBootstrap, type BrokerRequest } from './broker.ts'
-import type { DataSourcesEnvStatus, DataSourcesInstallResult, DataSourcesProbeResult } from './api.ts'
+import type {
+  DataSourcesCredentialListResult,
+  DataSourcesCredentialMutationResult,
+  DataSourcesCredentialSummary,
+  DataSourcesEnvStatus,
+  DataSourcesInstallResult,
+  DataSourcesProbeResult,
+} from './api.ts'
 import { checkEnvironment, installEnvironment, resolveUvPath } from './env-installer.ts'
 import type { ReadRequest, SourceConfig } from './types.ts'
 
@@ -169,6 +178,105 @@ export class DataSourcesRemote extends TypertRemoteService {
     signal.throwIfAborted()
     if (!this.envDelegate) return { ok: false, message: '环境管理服务未就绪' }
     return await this.envDelegate.reloadMcp(signal)
+  }
+
+  @Remote
+  async listCredentials(signal: AbortSignal): Promise<DataSourcesCredentialListResult> {
+    signal.throwIfAborted()
+    const credentials = this.ctx.get('credentials')
+    const refNames = new Set<string>()
+    try {
+      const dshHome = process.env.DSH_HOME || (process.platform === 'win32'
+        ? join(process.env.USERPROFILE || 'C:\\Users\\Default', '.dsh')
+        : join(process.env.HOME || '/root', '.dsh'))
+      const filename = join(dshHome, '.credentials.yaml')
+      const text = await readFile(filename, 'utf8')
+      let inRefs = false
+      for (const line of text.split('\n')) {
+        const trimmed = line.trim()
+        if (/^refs:\s*$/.test(trimmed)) {
+          inRefs = true
+          continue
+        }
+        if (inRefs) {
+          if (/^[a-zA-Z0-9_-]+:\s*$/.test(trimmed) && !line.startsWith(' ') && !line.startsWith('\t')) {
+            inRefs = false
+            continue
+          }
+          const match = /^\s+([A-Za-z_][A-Za-z0-9_]*):/.exec(line)
+          if (match && match[1]) {
+            refNames.add(match[1])
+          }
+        }
+      }
+    } catch {
+      // file missing or unreadable
+    }
+
+    for (const ref of this.supervisor.credentialRefs()) {
+      refNames.add(ref)
+    }
+
+    const summaries: DataSourcesCredentialSummary[] = []
+    for (const ref of refNames) {
+      if (credentials) {
+        try {
+          const info = await credentials.describe(credentialRef(ref))
+          summaries.push({
+            ref,
+            configured: info.configured,
+            source: info.source,
+            writable: info.writable,
+          })
+          continue
+        } catch {}
+      }
+      summaries.push({ ref, configured: true, writable: true })
+    }
+    return { ok: true, credentials: summaries }
+  }
+
+  @Remote
+  async saveCredential(
+    request: { ref: string; value: string },
+    signal: AbortSignal,
+  ): Promise<DataSourcesCredentialMutationResult> {
+    signal.throwIfAborted()
+    const ref = request.ref.trim()
+    if (!isCredentialRefName(ref)) {
+      return { ok: false, message: '凭据引用名称必须由英文字母、数字或下划线组成（且不能以数字开头）' }
+    }
+    if (!request.value || request.value.trim() === '') {
+      return { ok: false, message: '凭据值不能为空' }
+    }
+    const credentials = this.ctx.get('credentials')
+    if (!credentials) return { ok: false, message: '宿主机凭据服务未就绪' }
+    try {
+      await credentials.set(credentialRef(ref), request.value)
+      return { ok: true }
+    } catch (error) {
+      return { ok: false, message: error instanceof Error ? error.message : String(error) }
+    }
+  }
+
+  @Remote
+  async deleteCredential(
+    request: { ref: string },
+    signal: AbortSignal,
+  ): Promise<DataSourcesCredentialMutationResult> {
+    signal.throwIfAborted()
+    const ref = request.ref.trim()
+    if (!isCredentialRefName(ref)) {
+      return { ok: false, message: '无效的凭据引用名称' }
+    }
+    const credentials = this.ctx.get('credentials')
+    if (!credentials) return { ok: false, message: '宿主机凭据服务未就绪' }
+    try {
+      await credentials.unset(credentialRef(ref))
+      return { ok: true }
+    } catch (error) {
+      return { ok: false, message: error instanceof Error ? error.message : String(error) }
+    }
   }
 }
 

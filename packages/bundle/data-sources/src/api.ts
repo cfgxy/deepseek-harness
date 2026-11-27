@@ -21,3 +21,23 @@ export interface DataSourcesInstallResult {
   ok: boolean
   message: string
 }
+
+/** Summary of a credential reference available on the host. */
+export interface DataSourcesCredentialSummary {
+  ref: string
+  configured: boolean
+  source?: string | undefined
+  writable: boolean
+}
+
+/** Result of listing host credentials. */
+export interface DataSourcesCredentialListResult {
+  ok: boolean
+  credentials: DataSourcesCredentialSummary[]
+}
+
+/** Result of saving or deleting a host credential. */
+export interface DataSourcesCredentialMutationResult {
+  ok: boolean
+  message?: string
+}

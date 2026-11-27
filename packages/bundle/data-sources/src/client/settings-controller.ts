@@ -56,6 +56,21 @@ interface DataSourcesRemoteClient {
   checkEnvironment?: () => Promise<{ ok: boolean; value: { hasUv: boolean; hasPython: boolean; mcpRunning: boolean } }>
   installEnvironment?: () => Promise<{ ok: boolean; value: { ok: boolean; message: string } }>
   reloadMcp?: () => Promise<{ ok: boolean; value: { ok: boolean; message: string } }>
+  listCredentials?: () => Promise<{
+    ok: boolean
+    value: {
+      ok: boolean
+      credentials: Array<{ ref: string; configured: boolean; source?: string; writable: boolean }>
+    }
+  }>
+  saveCredential?: (request: { ref: string; value: string }) => Promise<{
+    ok: boolean
+    value: { ok: boolean; message?: string }
+  }>
+  deleteCredential?: (request: { ref: string }) => Promise<{
+    ok: boolean
+    value: { ok: boolean; message?: string }
+  }>
 }
 
 export interface DataSourcesCardState {
@@ -69,6 +84,7 @@ export interface DataSourcesCardState {
   sources: readonly DataSourceDraft[]
   probes: Readonly<Record<string, ProbeState>>
   envStatus: EnvStatusState
+  credentials: readonly { ref: string; configured: boolean; source?: string; writable: boolean }[]
 }
 
 export interface DataSourcesCardFace {
@@ -80,6 +96,9 @@ export interface DataSourcesCardFace {
   test: (sourceId: string) => void
   installEnvironment: () => void
   reloadMcp: () => void
+  saveCredential: (ref: string, value: string) => Promise<{ ok: boolean; message?: string }>
+  deleteCredential: (ref: string) => Promise<{ ok: boolean; message?: string }>
+  refreshCredentials: () => Promise<void>
 }
 
 const kinds: readonly SourceKind[] = ['local-directory', 's3', 'sftp', 'smb', 'nfs', 'ftp', 'webdav', 'mysql', 'postgresql']
@@ -199,6 +218,7 @@ export class DataSourcesSettingsController {
   private saving = false
   private nextId = 1
   private probes: Record<string, ProbeState> = {}
+  private credentials: readonly { ref: string; configured: boolean; source?: string; writable: boolean }[] = []
   private envStatus: EnvStatusState = {
     checked: false,
     hasUv: false,
@@ -212,6 +232,7 @@ export class DataSourcesSettingsController {
     this.store = createSnapshotStore(this.projection())
     this.unsubscribe = scope.subscribe(() => { this.publish() })
     void this.checkEnvironment()
+    void this.refreshCredentials()
   }
 
   private sources(): readonly DataSourceDraft[] {
@@ -226,7 +247,17 @@ export class DataSourcesSettingsController {
 
   private projection(): DataSourcesCardState {
     const snapshot = this.scope.getSnapshot()
-    return { available: snapshot.status === 'ready', writable: snapshot.writable, saving: this.saving, controllerId: this.controllerId, scopeRevision: snapshot.revision ?? 0, sources: this.sources(), probes: this.probes, envStatus: this.envStatus }
+    return {
+      available: snapshot.status === 'ready',
+      writable: snapshot.writable,
+      saving: this.saving,
+      controllerId: this.controllerId,
+      scopeRevision: snapshot.revision ?? 0,
+      sources: this.sources(),
+      probes: this.probes,
+      envStatus: this.envStatus,
+      credentials: this.credentials,
+    }
   }
 
   private publish(): void { if (!this.disposed) this.store.set(this.projection()) }
@@ -387,6 +418,44 @@ export class DataSourcesSettingsController {
     this.publish()
   }
 
+  private async refreshCredentials(): Promise<void> {
+    try {
+      const res = await this.remote?.listCredentials?.()
+      if (res && res.ok && res.value?.ok) {
+        this.credentials = res.value.credentials
+        this.publish()
+      }
+    } catch {
+      // remote credential list not available
+    }
+  }
+
+  private async saveCredential(ref: string, value: string): Promise<{ ok: boolean; message?: string }> {
+    try {
+      const res = await this.remote?.saveCredential?.({ ref, value })
+      if (res && res.ok && res.value?.ok) {
+        await this.refreshCredentials()
+        return { ok: true }
+      }
+      return { ok: false, message: res?.value?.message ?? '保存凭据失败' }
+    } catch (e) {
+      return { ok: false, message: e instanceof Error ? e.message : String(e) }
+    }
+  }
+
+  private async deleteCredential(ref: string): Promise<{ ok: boolean; message?: string }> {
+    try {
+      const res = await this.remote?.deleteCredential?.({ ref })
+      if (res && res.ok && res.value?.ok) {
+        await this.refreshCredentials()
+        return { ok: true }
+      }
+      return { ok: false, message: res?.value?.message ?? '删除凭据失败' }
+    } catch (e) {
+      return { ok: false, message: e instanceof Error ? e.message : String(e) }
+    }
+  }
+
   inject(): DataSourcesCardFace {
     return {
       hooks: { dataSourcesSettings: this.store },
@@ -397,6 +466,9 @@ export class DataSourcesSettingsController {
       test: (sourceId) => { this.test(sourceId) },
       installEnvironment: () => { void this.installEnvironment() },
       reloadMcp: () => { void this.reloadMcp() },
+      saveCredential: (ref, value) => this.saveCredential(ref, value),
+      deleteCredential: ref => this.deleteCredential(ref),
+      refreshCredentials: () => this.refreshCredentials(),
     }
   }
 

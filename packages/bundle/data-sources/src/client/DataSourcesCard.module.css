@@ -150,6 +150,79 @@
   color: var(--dsw-alias-label-primary);
 }
 
+.authModeToggle {
+  display: flex;
+  gap: 8px;
+  margin-top: 4px;
+  margin-bottom: 8px;
+}
+
+.authModeBtn {
+  padding: 4px 12px;
+  font-size: 12px;
+  font-weight: 500;
+  border-radius: var(--dsw-radius-sm);
+  border: 0.5px solid var(--dsw-alias-border-l3);
+  background: var(--dsw-alias-settings-card-fill);
+  color: var(--dsw-alias-label-secondary);
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.authModeBtn:hover {
+  color: var(--dsw-alias-label-primary);
+  border-color: var(--dsw-alias-border-l2);
+}
+
+.authModeBtnActive {
+  background: var(--dsw-alias-state-business-primary);
+  color: #fff;
+  border-color: var(--dsw-alias-state-business-primary);
+}
+
+.credSelectRow {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+
+.credSelectRow select {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.credActionBtn {
+  flex: none;
+  font-size: 12px;
+  padding: 4px 10px;
+  height: 32px;
+}
+
+.credModalForm {
+  display: grid;
+  gap: 12px;
+  padding: 8px 0;
+}
+
+.credModalTextarea {
+  box-sizing: border-box;
+  width: 100%;
+  min-height: 80px;
+  border: 0.5px solid var(--dsw-alias-border-l3);
+  border-radius: var(--dsw-radius-sm);
+  background: var(--dsw-alias-settings-card-fill);
+  color: var(--dsw-alias-label-primary);
+  font-family: var(--dsw-font-mono, monospace);
+  font-size: 12px;
+  padding: 6px 8px;
+  resize: vertical;
+}
+
+.credModalTextarea:focus-visible {
+  outline: 2px solid var(--dsw-alias-state-business-primary);
+  outline-offset: 1px;
+}
+
 @media (min-width: 560px) {
   .grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .grid > :nth-child(1):last-child,
