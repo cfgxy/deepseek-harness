@@ -5,6 +5,16 @@ import { readFile } from 'node:fs/promises'
 import { createHash } from 'node:crypto'
 import type { ConnectorRequest, ReadConnector } from './supervisor.ts'
 import type { ReadResult } from './types.ts'
+import { connectSocket } from './proxy.ts'
+
+/** Statement keywords that mutate database state or structure. */
+const WRITE_SQL_REGEX = /^\s*(insert|update|delete|drop|alter|truncate|create|grant|revoke|merge|replace|call|execute)\b/i
+
+function assertAccessMode(policy: ConnectorRequest['source']['policy'], sql: string): void {
+  if (policy.accessMode !== 'rw' && WRITE_SQL_REGEX.test(sql)) {
+    throw new Error('data-sources: source is read-only (RO); write operations are prohibited')
+  }
+}
 
 /** Upper bound prevents a hostile peer from forcing unbounded frame/row buffering. */
 const MAX_PROTOCOL_MESSAGE_BYTES = 1024 * 1024
@@ -42,13 +52,14 @@ export class PostgreSqlConnector implements ReadConnector {
   async probe(request: Omit<ConnectorRequest, 'request'>): Promise<void> { await this.#query(request, 'SELECT 1') }
   async execute(request: ConnectorRequest): Promise<Omit<ReadResult, 'source' | 'evidence'>> {
     const sql = request.request.operation === 'catalog' ? 'SELECT table_schema, table_name FROM information_schema.tables WHERE table_type = \'BASE TABLE\' ORDER BY 1,2' : String(request.request.input.sql)
+    assertAccessMode(request.source.policy, sql)
     const result = await this.#query(request, sql)
     return { data: { columns: result.columns, rows: result.rows }, truncated: result.truncated }
   }
   async #query(request: Omit<ConnectorRequest, 'request'> | ConnectorRequest, sql: string): Promise<{ columns: string[]; rows: unknown[][]; truncated: boolean }> {
-    const { host, port = 5432, database } = request.source.connection!; const credential = auth(request.credential)
-    const socket = net.createConnection({ host, port })
+    const { database } = request.source.connection!; const credential = auth(request.credential)
     const timeout = request.source.connection?.timeoutMs ?? 10_000
+    const { socket, close: closeProxy } = await connectSocket(request.source.connection!, timeout)
     const deadline = setTimeout(() => socket.destroy(new Error(`data-sources: PostgreSQL operation timed out after ${timeout}ms`)), timeout)
     let buffer = Buffer.alloc(0)
     let ready = false
@@ -61,7 +72,9 @@ export class PostgreSqlConnector implements ReadConnector {
     const maxBytes = limits?.maxBytes ?? Number.POSITIVE_INFINITY
     let emittedBytes = 0
     let truncated = false
-    await new Promise<void>((resolve, reject) => { socket.once('connect', resolve); socket.once('error', reject) })
+    if (socket.connecting) {
+      await new Promise<void>((resolve, reject) => { socket.once('connect', resolve); socket.once('error', reject) })
+    }
     const transport = await upgradeTls(socket, request.source)
     const startup = Buffer.concat([Buffer.from([0, 0, 0, 0, 0, 3, 0, 0]), cstring('user'), cstring(credential.username), cstring('database'), cstring(database!), Buffer.from([0])]); startup.writeUInt32BE(startup.length)
     transport.write(startup)
@@ -85,6 +98,6 @@ export class PostgreSqlConnector implements ReadConnector {
         }
       })
     })
-    try { await done; return { columns, rows, truncated } } finally { clearTimeout(deadline); transport.end() }
+    try { await done; return { columns, rows, truncated } } finally { clearTimeout(deadline); transport.end(); await closeProxy().catch(() => {}) }
   }
 }

@@ -127,6 +127,10 @@ export function SignInDialog({ account, colorScheme, start, cancel, close, useAp
         placeholder="https://tenant.ainoriahub.com" onChange={(event) => { setOrigin(event.target.value) }} /></label>}
       <label>{t('panuoyunEmail')}<input type="email" autoComplete="username" value={email} disabled={busy} onChange={(event) => { setEmail(event.target.value) }} /></label>
       <label>{t('panuoyunPassword')}<input type="password" autoComplete="current-password" value={password} disabled={busy} onChange={(event) => { setPassword(event.target.value) }} /></label>
+      {mode === 'personal' && <div className={css.autoKeyNote}>
+        <span className={css.autoKeyIcon}>✓</span>
+        <span>登录后将自动为当前账号生成并配置专用 Key</span>
+      </div>}
       {error && <p role="alert">{t(failureKey)}</p>}
     </div>
     <div className={css.actions}>
@@ -135,9 +139,9 @@ export function SignInDialog({ account, colorScheme, start, cancel, close, useAp
     </div>
     <div className={css.footerLinks}>
       <button type="button" className={css.linkText} disabled={busy} onClick={signOutPanuoyun}>{t('panuoyunSignOut')}</button>
-      <span className={css.footerDivider}>|</span>
+      <span className={css.footerDivider}>·</span>
       <button type="button" className={css.linkText} disabled={busy} onClick={() => { setRoute('deepseek'); setFailed(false) }}>{t('deepSeekAccount')}</button>
-      <span className={css.footerDivider}>|</span>
+      <span className={css.footerDivider}>·</span>
       <button type="button" className={css.linkText} disabled={busy} onClick={selectApiKey}>{t('addApiKey')}</button>
     </div>
   </> : <>
@@ -156,7 +160,7 @@ export function SignInDialog({ account, colorScheme, start, cancel, close, useAp
     </div>
     <div className={css.footerLinks}>
       <button type="button" className={css.linkText} disabled={busy} onClick={() => { setRoute('deepseek'); setFailed(false) }}>{t('deepSeekAccount')}</button>
-      <span className={css.footerDivider}>|</span>
+      <span className={css.footerDivider}>·</span>
       <button type="button" className={css.linkText} disabled={busy} onClick={selectApiKey}>{t('addApiKey')}</button>
     </div>
   </>
@@ -168,6 +172,28 @@ export function SignInDialog({ account, colorScheme, start, cancel, close, useAp
           <IconCloseOutlineRegular size={14} />
         </button>
       </div>
+      {panuoyun !== undefined && !active && (
+        <div className={css.navTabs} role="tablist">
+          <button
+            type="button"
+            role="tab"
+            aria-selected={route === 'panuoyun'}
+            className={`${css.navTab} ${route === 'panuoyun' ? css.navTabActive : ''}`}
+            onClick={selectPanuoyun}
+          >
+            {t('panuoyunTitle')}
+          </button>
+          <button
+            type="button"
+            role="tab"
+            aria-selected={route === 'deepseek'}
+            className={`${css.navTab} ${route === 'deepseek' ? css.navTabActive : ''}`}
+            onClick={() => { setRoute('deepseek'); setFailed(false) }}
+          >
+            {t('deepSeekAccount')}
+          </button>
+        </div>
+      )}
       {route === 'panuoyun' && !active ? panuoyunForm : waiting ? <p className={css.description}>
         {t('browserPrompt')}<button type="button" className={css.link} disabled={!authorizeUrl}
           onClick={authorizeUrl ? () => { void copyLink(authorizeUrl) } : undefined}>

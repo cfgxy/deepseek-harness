@@ -31,8 +31,19 @@ export interface DataSourceDraft {
     tlsEnabled: boolean
     tlsCaPath: string
     tlsServerName: string
+    proxyType: 'none' | 'ssh' | 'socks5'
+    sshHost: string
+    sshPort: string
+    sshUsername: string
+    sshAuthMode: 'password' | 'privateKey'
+    sshPassword: string
+    sshPrivateKey: string
+    socksHost: string
+    socksPort: string
+    socksUsername: string
+    socksPassword: string
   }
-  policy: { maxBytes: string; maxRows: string; allowedPath: string; allowedPrefix: string }
+  policy: { maxBytes: string; maxRows: string; allowedPath: string; allowedPrefix: string; accessMode: 'ro' | 'rw' }
 }
 
 interface DataSourcesSettings { sources?: unknown }
@@ -120,6 +131,14 @@ export function sourceDraft(value: unknown): DataSourceDraft | undefined {
     ? source.policy as Record<string, unknown> : {}
   const tls = typeof connection.tls === 'object' && connection.tls !== null && !Array.isArray(connection.tls)
     ? connection.tls as Record<string, unknown> : {}
+  const proxy = typeof connection.proxy === 'object' && connection.proxy !== null && !Array.isArray(connection.proxy)
+    ? connection.proxy as Record<string, unknown> : {}
+  const ssh = typeof proxy.ssh === 'object' && proxy.ssh !== null && !Array.isArray(proxy.ssh)
+    ? proxy.ssh as Record<string, unknown> : {}
+  const socks = typeof proxy.socks5 === 'object' && proxy.socks5 !== null && !Array.isArray(proxy.socks5)
+    ? proxy.socks5 as Record<string, unknown> : {}
+  const proxyType: 'none' | 'ssh' | 'socks5' = proxy.type === 'ssh' || proxy.type === 'socks5' ? proxy.type : 'none'
+  const accessMode: 'ro' | 'rw' = policy.accessMode === 'rw' ? 'rw' : 'ro'
   return {
     id: text(source.id), revision: text(source.revision), kind: source.kind as SourceKind,
     label: text(source.label), enabled: source.enabled !== false, credentialRef: text(source.credentialRef),
@@ -129,10 +148,22 @@ export function sourceDraft(value: unknown): DataSourceDraft | undefined {
       knownHostsPath: text(connection.knownHostsPath), timeoutMs: integer(connection.timeoutMs),
       statementTimeoutMs: integer(connection.statementTimeoutMs), tlsEnabled: tls.enabled === true,
       tlsCaPath: text(tls.caPath), tlsServerName: text(tls.serverName),
+      proxyType,
+      sshHost: text(ssh.host),
+      sshPort: integer(ssh.port) || '22',
+      sshUsername: text(ssh.username),
+      sshAuthMode: ssh.authMode === 'privateKey' ? 'privateKey' : 'password',
+      sshPassword: text(ssh.password),
+      sshPrivateKey: text(ssh.privateKey),
+      socksHost: text(socks.host),
+      socksPort: integer(socks.port) || '1080',
+      socksUsername: text(socks.username),
+      socksPassword: text(socks.password),
     },
     policy: {
       maxBytes: integer(policy.maxBytes), maxRows: integer(policy.maxRows),
       allowedPath: text(policy.allowedPath), allowedPrefix: text(policy.allowedPrefix),
+      accessMode,
     },
   }
 }
@@ -197,7 +228,34 @@ export function serialise(source: DataSourceDraft): Record<string, unknown> {
       }
     }
   }
-  const policy: Record<string, unknown> = { maxBytes: Number(source.policy.maxBytes), maxRows: Number(source.policy.maxRows) }
+  if (source.connection.proxyType === 'ssh') {
+    connection.proxy = {
+      type: 'ssh',
+      ssh: {
+        host: source.connection.sshHost.trim(),
+        ...source.connection.sshPort.trim() ? { port: Number(source.connection.sshPort) } : {},
+        username: source.connection.sshUsername.trim(),
+        authMode: source.connection.sshAuthMode,
+        ...source.connection.sshPassword ? { password: source.connection.sshPassword } : {},
+        ...source.connection.sshPrivateKey ? { privateKey: source.connection.sshPrivateKey } : {},
+      },
+    }
+  } else if (source.connection.proxyType === 'socks5') {
+    connection.proxy = {
+      type: 'socks5',
+      socks5: {
+        host: source.connection.socksHost.trim(),
+        ...source.connection.socksPort.trim() ? { port: Number(source.connection.socksPort) } : {},
+        ...source.connection.socksUsername.trim() ? { username: source.connection.socksUsername.trim() } : {},
+        ...source.connection.socksPassword ? { password: source.connection.socksPassword } : {},
+      },
+    }
+  }
+  const policy: Record<string, unknown> = {
+    maxBytes: Number(source.policy.maxBytes),
+    maxRows: Number(source.policy.maxRows),
+    accessMode: source.policy.accessMode === 'rw' ? 'rw' : 'ro',
+  }
   if (directoryKinds.includes(kind)) policy.allowedPath = source.policy.allowedPath.trim()
   if (kind === 's3') policy.allowedPrefix = source.policy.allowedPrefix.trim()
   return {
@@ -308,8 +366,13 @@ export class DataSourcesSettingsController {
     while (ids.has(id)) id = `source-${this.nextId++}`
     return {
       id, revision: '1', kind: '', label: '', enabled: true, credentialRef: '',
-      connection: { endpoint: '', bucket: '', region: '', host: '', port: '', database: '', knownHostsPath: '', timeoutMs: '10000', statementTimeoutMs: '', tlsEnabled: false, tlsCaPath: '', tlsServerName: '' },
-      policy: { maxBytes: '65536', maxRows: '100', allowedPath: '', allowedPrefix: '' },
+      connection: {
+        endpoint: '', bucket: '', region: '', host: '', port: '', database: '', knownHostsPath: '',
+        timeoutMs: '10000', statementTimeoutMs: '', tlsEnabled: false, tlsCaPath: '', tlsServerName: '',
+        proxyType: 'none', sshHost: '', sshPort: '22', sshUsername: '', sshAuthMode: 'password',
+        sshPassword: '', sshPrivateKey: '', socksHost: '', socksPort: '1080', socksUsername: '', socksPassword: '',
+      },
+      policy: { maxBytes: '65536', maxRows: '100', allowedPath: '', allowedPrefix: '', accessMode: 'ro' },
     }
   }
 
