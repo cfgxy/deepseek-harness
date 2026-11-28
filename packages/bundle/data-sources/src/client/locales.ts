@@ -14,6 +14,10 @@ export type DataSourcesLocaleKey =
   | 'selectCredential' | 'selectCredentialPlaceholder' | 'customCredentialOption' | 'createCredentialBtn' | 'deleteCredentialBtn'
   | 'createCredentialTitle' | 'credentialNameLabel' | 'credentialValueLabel' | 'confirmCreate' | 'credentialCreated' | 'credentialDeleted'
   | 'confirmDeleteCredential' | 'confirmDeleteCredentialDesc'
+  | 'accessMode' | 'accessModeRo' | 'accessModeRw' | 'accessModeHint'
+  | 'proxy' | 'proxyType' | 'proxyNone' | 'proxySsh' | 'proxySocks5'
+  | 'sshHost' | 'sshPort' | 'sshUsername' | 'sshAuthMode' | 'sshPasswordMode' | 'sshPrivateKeyMode' | 'sshPassword' | 'sshPrivateKey'
+  | 'socksHost' | 'socksPort' | 'socksUsername' | 'socksPassword'
 
 export const en: Record<DataSourcesLocaleKey, string> = {
   panel: 'Data sources', pageTitle: 'Data sources', pageSubtitle: 'Reads only from the scope you specify. Source data is never changed.',
@@ -37,6 +41,10 @@ export const en: Record<DataSourcesLocaleKey, string> = {
   createCredentialTitle: 'Create host credential', credentialNameLabel: 'Credential name (Ref)', credentialValueLabel: 'Credential payload (JSON or text)',
   confirmCreate: 'Save credential', credentialCreated: 'Credential saved to host.', credentialDeleted: 'Credential removed from host.',
   confirmDeleteCredential: 'Delete host credential?', confirmDeleteCredentialDesc: 'This credential will be removed from ~/.dsh/.credentials.yaml. Any source using it may fail to connect.',
+  accessMode: 'Access mode', accessModeRo: 'Read-only (RO) [Recommended]', accessModeRw: 'Read & Write (RW)', accessModeHint: 'Sources default to read-only. Select RW to permit write queries and changes.',
+  proxy: 'Proxy & Tunnel (SSH / SOCKS5)', proxyType: 'Proxy type', proxyNone: 'None (Direct connection)', proxySsh: 'SSH Tunnel (Bastion host)', proxySocks5: 'SOCKS5 Proxy',
+  sshHost: 'SSH Host', sshPort: 'SSH Port', sshUsername: 'SSH Username', sshAuthMode: 'SSH Authentication', sshPasswordMode: 'Password', sshPrivateKeyMode: 'Private Key', sshPassword: 'SSH Password', sshPrivateKey: 'SSH Private Key',
+  socksHost: 'SOCKS5 Host', socksPort: 'SOCKS5 Port', socksUsername: 'SOCKS5 Username (optional)', socksPassword: 'SOCKS5 Password (optional)',
 }
 
 export const zh: Record<DataSourcesLocaleKey, string> = {
@@ -61,4 +69,8 @@ export const zh: Record<DataSourcesLocaleKey, string> = {
   createCredentialTitle: '新建宿主机凭据', credentialNameLabel: '凭据名称（Ref）', credentialValueLabel: '凭据内容 (JSON / 文本)',
   confirmCreate: '保存到宿主机', credentialCreated: '凭据已保存到宿主机。', credentialDeleted: '凭据已从宿主机删除。',
   confirmDeleteCredential: '确定删除宿主机凭据？', confirmDeleteCredentialDesc: '将从 ~/.dsh/.credentials.yaml 中删除此凭据，其他引用该凭据的数据源可能连接失败。',
+  accessMode: '访问权限模式', accessModeRo: '只读 (RO) [默认安全推荐]', accessModeRw: '读写 (RW - 允许写入与修改)', accessModeHint: '原则上接入源默认为 RO（只读安全保护）。若需执行数据插入、更新等修改操作，请选择 RW。',
+  proxy: '网络代理与隧道 (SSH / SOCKS5)', proxyType: '代理方式', proxyNone: '不使用代理（直接连接）', proxySsh: 'SSH 隧道转发（跳板机）', proxySocks5: 'SOCKS5 代理',
+  sshHost: 'SSH 跳板机主机', sshPort: 'SSH 端口', sshUsername: 'SSH 用户名', sshAuthMode: 'SSH 认证方式', sshPasswordMode: '密码认证', sshPrivateKeyMode: '私钥认证', sshPassword: 'SSH 密码', sshPrivateKey: 'SSH 私钥',
+  socksHost: 'SOCKS5 代理主机', socksPort: 'SOCKS5 代理端口', socksUsername: 'SOCKS5 用户名（可选）', socksPassword: 'SOCKS5 密码（可选）',
 }

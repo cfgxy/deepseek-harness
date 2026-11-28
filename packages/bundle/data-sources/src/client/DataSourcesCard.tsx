@@ -116,8 +116,13 @@ export function DataSourcesCard(props: DataSourcesCardProps) {
     ...source,
     kind,
     credentialRef: '',
-    connection: { ...source.connection, endpoint: '', bucket: '', region: '', host: '', port: kind === '' ? '' : defaultPort(kind), database: '', knownHostsPath: '', timeoutMs: '10000', statementTimeoutMs: '', tlsEnabled: false, tlsCaPath: '', tlsServerName: '' },
-    policy: { ...source.policy, allowedPath: '', allowedPrefix: '' },
+    connection: {
+      ...source.connection, endpoint: '', bucket: '', region: '', host: '', port: kind === '' ? '' : defaultPort(kind),
+      database: '', knownHostsPath: '', timeoutMs: '10000', statementTimeoutMs: '', tlsEnabled: false, tlsCaPath: '', tlsServerName: '',
+      proxyType: 'none', sshHost: '', sshPort: '22', sshUsername: '', sshAuthMode: 'password', sshPassword: '', sshPrivateKey: '',
+      socksHost: '', socksPort: '1080', socksUsername: '', socksPassword: '',
+    },
+    policy: { ...source.policy, allowedPath: '', allowedPrefix: '', accessMode: source.policy.accessMode || 'ro' },
   })
   const execute = (action: PendingAction): void => {
     if (action.type === 'open') { setSelectedId(action.source.id); return }
@@ -299,6 +304,7 @@ export function DataSourcesCard(props: DataSourcesCardProps) {
               <span className={styles.icon} aria-hidden="true">{source.kind.slice(0, 1).toUpperCase()}</span>
               <span className={styles.identity}><strong>{source.label || source.id}</strong><small>{detailKind(source.kind)}</small></span>
             </button>
+            <Tag tone={source.policy.accessMode === 'rw' ? 'warning' : 'neutral'}>{source.policy.accessMode === 'rw' ? 'RW' : 'RO'}</Tag>
             <Tag tone={source.enabled ? 'success' : 'neutral'}>{source.enabled ? props.t('enabled') : props.t('disabled')}</Tag>
             <Switch checked={source.enabled} label={`${source.label || source.id}: ${props.t('enabled')}`} disabled={disabled || (expanded && dirty)} title={expanded && dirty ? props.t('testDisabledDirty') : undefined} onChange={(enabled) => { void props.setEnabled(source.id, enabled) }} />
           </div>
@@ -580,6 +586,65 @@ function Editor({
             <div className={styles.grid}>{connection}</div>
           </fieldset>
         )}
+        {['sftp', 'ftp', 'mysql', 'postgresql'].includes(draft.kind) ? (
+          <fieldset>
+            <legend>{props.t('proxy')}</legend>
+            <div className={styles.grid}>
+              <label className={styles.field} htmlFor="ds-proxy-type">
+                <span>{props.t('proxyType')}</span>
+                <select
+                  id="ds-proxy-type"
+                  value={draft.connection.proxyType || 'none'}
+                  disabled={disabled}
+                  onChange={event => update(source => ({ ...source, connection: { ...source.connection, proxyType: event.currentTarget.value as 'none' | 'ssh' | 'socks5' } }))}
+                >
+                  <option value="none">{props.t('proxyNone')}</option>
+                  <option value="ssh">{props.t('proxySsh')}</option>
+                  <option value="socks5">{props.t('proxySocks5')}</option>
+                </select>
+              </label>
+              {draft.connection.proxyType === 'ssh' ? <>
+                {input('ssh-host', props.t('sshHost'), draft.connection.sshHost, value => update(source => ({ ...source, connection: { ...source.connection, sshHost: value } })))}
+                {input('ssh-port', props.t('sshPort'), draft.connection.sshPort, value => update(source => ({ ...source, connection: { ...source.connection, sshPort: value } })), { type: 'number' })}
+                {input('ssh-username', props.t('sshUsername'), draft.connection.sshUsername, value => update(source => ({ ...source, connection: { ...source.connection, sshUsername: value } })))}
+                <label className={styles.field} htmlFor="ds-ssh-auth-mode">
+                  <span>{props.t('sshAuthMode')}</span>
+                  <select
+                    id="ds-ssh-auth-mode"
+                    value={draft.connection.sshAuthMode || 'password'}
+                    disabled={disabled}
+                    onChange={event => update(source => ({ ...source, connection: { ...source.connection, sshAuthMode: event.currentTarget.value as 'password' | 'privateKey' } }))}
+                  >
+                    <option value="password">{props.t('sshPasswordMode')}</option>
+                    <option value="privateKey">{props.t('sshPrivateKeyMode')}</option>
+                  </select>
+                </label>
+                {draft.connection.sshAuthMode === 'privateKey' ? (
+                  <label className={styles.field} htmlFor="ds-ssh-pk">
+                    <span>{props.t('sshPrivateKey')}</span>
+                    <textarea
+                      id="ds-ssh-pk"
+                      className={styles.credModalTextarea}
+                      rows={3}
+                      value={draft.connection.sshPrivateKey}
+                      disabled={disabled}
+                      placeholder="-----BEGIN OPENSSH PRIVATE KEY-----"
+                      onChange={e => update(source => ({ ...source, connection: { ...source.connection, sshPrivateKey: e.currentTarget.value } }))}
+                    />
+                  </label>
+                ) : (
+                  input('ssh-password', props.t('sshPassword'), draft.connection.sshPassword, value => update(source => ({ ...source, connection: { ...source.connection, sshPassword: value } })), { type: 'password' })
+                )}
+              </> : null}
+              {draft.connection.proxyType === 'socks5' ? <>
+                {input('socks-host', props.t('socksHost'), draft.connection.socksHost, value => update(source => ({ ...source, connection: { ...source.connection, socksHost: value } })))}
+                {input('socks-port', props.t('socksPort'), draft.connection.socksPort, value => update(source => ({ ...source, connection: { ...source.connection, socksPort: value } })), { type: 'number' })}
+                {input('socks-username', props.t('socksUsername'), draft.connection.socksUsername, value => update(source => ({ ...source, connection: { ...source.connection, socksUsername: value } })))}
+                {input('socks-password', props.t('socksPassword'), draft.connection.socksPassword, value => update(source => ({ ...source, connection: { ...source.connection, socksPassword: value } })), { type: 'password' })}
+              </> : null}
+            </div>
+          </fieldset>
+        ) : null}
         {noAuthKinds.includes(draft.kind as SourceKind) ? null : (
           <fieldset>
             <legend>{props.t('authMode')}</legend>
@@ -759,6 +824,19 @@ function Editor({
         <fieldset>
           <legend>{props.t('policy')}</legend>
           <div className={styles.grid}>
+            <label className={styles.field} htmlFor="plugin-config-data-sources-access-mode">
+              <span>{props.t('accessMode')}</span>
+              <select
+                id="plugin-config-data-sources-access-mode"
+                value={draft.policy.accessMode || 'ro'}
+                disabled={disabled}
+                onChange={event => update(source => ({ ...source, policy: { ...source.policy, accessMode: event.currentTarget.value as 'ro' | 'rw' } }))}
+              >
+                <option value="ro">{props.t('accessModeRo')}</option>
+                <option value="rw">{props.t('accessModeRw')}</option>
+              </select>
+              <small>{props.t('accessModeHint')}</small>
+            </label>
             {directory ? input('allowed-path', props.t('allowedPath'), draft.policy.allowedPath, value => (
               update(source => ({ ...source, policy: { ...source.policy, allowedPath: value } }))
             )) : null}

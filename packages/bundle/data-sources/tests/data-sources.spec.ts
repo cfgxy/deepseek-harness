@@ -900,4 +900,77 @@ describe('read-only data source supervisor', () => {
       await new Promise<void>((resolve, reject) => server.close((error) => { if (error === undefined) resolve(); else reject(error) }))
     }
   }, 15_000)
+
+  it('permits write SQL when accessMode is rw and blocks when ro or default', async () => {
+    const rwSource: SourceConfig = {
+      ...source('postgresql'),
+      id: 'pg_rw',
+      policy: { maxBytes: 1024, maxRows: 10, accessMode: 'rw' },
+    }
+    const roSource: SourceConfig = {
+      ...source('postgresql'),
+      id: 'pg_ro',
+      policy: { maxBytes: 1024, maxRows: 10, accessMode: 'ro' },
+    }
+    const execute = vi.fn(async () => ({ data: { columns: ['count'], rows: [[1]] }, truncated: false }))
+    const supervisor = new ConnectorSupervisor([rwSource, roSource], [{ kind: 'postgresql', probe: async () => {}, execute }], {
+      resolve: async () => ({ value: 'fixture-secret' }),
+    })
+
+    // RO blocks write SQL
+    await expect(supervisor.execute({
+      apiVersion: 'v1', sourceId: 'pg_ro', operation: 'sql.query', input: { sql: 'INSERT INTO users(name) VALUES (\'alice\')' },
+    })).rejects.toThrow('only one SELECT')
+    expect(execute).not.toHaveBeenCalled()
+
+    // RW permits write SQL
+    await expect(supervisor.execute({
+      apiVersion: 'v1', sourceId: 'pg_rw', operation: 'sql.query', input: { sql: 'INSERT INTO users(name) VALUES (\'alice\')' },
+    })).resolves.toMatchObject({ data: { columns: ['count'], rows: [[1]] } })
+    expect(execute).toHaveBeenCalledTimes(1)
+  })
+
+  it('validates proxy and accessMode configuration in assertSourceConfig', () => {
+    const base = source('postgresql')
+    expect(() => assertSourceConfig({
+      ...base,
+      policy: { ...base.policy, accessMode: 'ro' },
+      connection: {
+        ...base.connection!,
+        proxy: {
+          type: 'ssh',
+          ssh: { host: 'proxy.internal', port: 22, username: 'tunnel', authMode: 'password' },
+        },
+      },
+    })).not.toThrow()
+
+    expect(() => assertSourceConfig({
+      ...base,
+      policy: { ...base.policy, accessMode: 'rw' },
+      connection: {
+        ...base.connection!,
+        proxy: {
+          type: 'socks5',
+          socks5: { host: '127.0.0.1', port: 1080 },
+        },
+      },
+    })).not.toThrow()
+
+    // Invalid proxy type
+    expect(() => assertSourceConfig({
+      ...base,
+      connection: {
+        ...base.connection!,
+        // @ts-expect-error test invalid type
+        proxy: { type: 'http' },
+      },
+    })).toThrow('invalid proxy type')
+
+    // Invalid accessMode
+    expect(() => assertSourceConfig({
+      ...base,
+      // @ts-expect-error test invalid accessMode
+      policy: { ...base.policy, accessMode: 'invalid' },
+    })).toThrow("must be 'ro' or 'rw'")
+  })
 })

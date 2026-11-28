@@ -16,6 +16,7 @@
     "src/mounted-directory.ts",
     "src/policy.ts",
     "src/postgresql.ts",
+    "src/proxy.ts",
     "src/s3.ts",
     "src/sftp.ts",
     "src/supervisor.ts",

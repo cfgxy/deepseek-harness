@@ -6,11 +6,35 @@ export const SOURCE_KINDS = ['local-directory', 's3', 'sftp', 'smb', 'nfs', 'ftp
 export type SourceKind = typeof SOURCE_KINDS[number]
 export type ReadOperation = 'catalog' | 'object.read' | 'directory.list' | 'sql.query'
 
+export interface SshTunnelConfig {
+  host: string
+  port?: number
+  username: string
+  authMode?: 'password' | 'privateKey'
+  password?: string
+  privateKey?: string
+}
+
+export interface Socks5ProxyConfig {
+  host: string
+  port?: number
+  username?: string
+  password?: string
+}
+
+export interface ProxyConfig {
+  type: 'none' | 'ssh' | 'socks5'
+  ssh?: SshTunnelConfig
+  socks5?: Socks5ProxyConfig
+}
+
 export interface SourcePolicy {
   maxBytes: number
   maxRows: number
   allowedPath?: string
   allowedPrefix?: string
+  /** Access permission mode; defaults to 'ro' (Read-Only) when omitted. */
+  accessMode?: 'ro' | 'rw'
 }
 /** Non-secret connection coordinates. Authentication material always comes from credentialRef. */
 export interface SourceConnection {
@@ -27,6 +51,8 @@ export interface SourceConnection {
   statementTimeoutMs?: number
   /** Explicit opt-in; peer verification always remains enabled. */
   tls?: { enabled?: boolean; caPath?: string; serverName?: string }
+  /** Optional network proxy (SSH tunnel / SOCKS5). */
+  proxy?: ProxyConfig
 }
 export interface SourceConfig {
   id: string
@@ -89,6 +115,19 @@ export function assertSourceConfig(source: SourceConfig): void {
     if (value !== undefined && (!Number.isInteger(value) || value < 1 || value > 120_000)) {
       throw new Error(`data-sources: source ${source.id} has an invalid ${field}`)
     }
+  }
+  if (source.policy.accessMode !== undefined && source.policy.accessMode !== 'ro' && source.policy.accessMode !== 'rw') {
+    throw new Error(`data-sources: source ${source.id} has an invalid accessMode; must be 'ro' or 'rw'`)
+  }
+  const proxy = source.connection?.proxy
+  if (proxy !== undefined && proxy.type !== 'none' && proxy.type !== 'ssh' && proxy.type !== 'socks5') {
+    throw new Error(`data-sources: source ${source.id} has an invalid proxy type`)
+  }
+  if (proxy?.type === 'ssh') {
+    if (!proxy.ssh?.host || !proxy.ssh.username) throw new Error(`data-sources: source ${source.id} SSH proxy requires host and username`)
+  }
+  if (proxy?.type === 'socks5') {
+    if (!proxy.socks5?.host) throw new Error(`data-sources: source ${source.id} SOCKS5 proxy requires host`)
   }
   const tls = source.connection?.tls
   if (tls !== undefined && (tls.caPath !== undefined || tls.serverName !== undefined) && tls.enabled !== true) {

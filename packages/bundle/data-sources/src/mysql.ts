@@ -5,6 +5,15 @@ import { readFile } from 'node:fs/promises'
 import { createHash } from 'node:crypto'
 import type { ConnectorRequest, ReadConnector } from './supervisor.ts'
 import type { ReadResult } from './types.ts'
+import { connectSocket } from './proxy.ts'
+
+const WRITE_SQL_REGEX = /^\s*(insert|update|delete|drop|alter|truncate|create|grant|revoke|merge|replace|call|execute)\b/i
+
+function assertAccessMode(policy: ConnectorRequest['source']['policy'], sql: string): void {
+  if (policy.accessMode !== 'rw' && WRITE_SQL_REGEX.test(sql)) {
+    throw new Error('data-sources: source is read-only (RO); write operations are prohibited')
+  }
+}
 
 /** Upper bound prevents a hostile peer from forcing unbounded packet/row buffering. */
 const MAX_PROTOCOL_PACKET_BYTES = 1024 * 1024
@@ -27,11 +36,12 @@ async function upgradeTls(socket: net.Socket, request: ConnectorRequest['source'
 export class MysqlConnector implements ReadConnector {
   readonly kind = 'mysql' as const
   async probe(request: Omit<ConnectorRequest, 'request'>): Promise<void> { await this.#query(request, 'SELECT 1') }
-  async execute(request: ConnectorRequest): Promise<Omit<ReadResult, 'source' | 'evidence'>> { const sql = request.request.operation === 'catalog' ? 'SHOW TABLES' : String(request.request.input.sql); const result = await this.#query(request, sql); return { data: { columns: result.columns, rows: result.rows }, truncated: result.truncated } }
+  async execute(request: ConnectorRequest): Promise<Omit<ReadResult, 'source' | 'evidence'>> { const sql = request.request.operation === 'catalog' ? 'SHOW TABLES' : String(request.request.input.sql); assertAccessMode(request.source.policy, sql); const result = await this.#query(request, sql); return { data: { columns: result.columns, rows: result.rows }, truncated: result.truncated } }
   async #query(request: Omit<ConnectorRequest, 'request'> | ConnectorRequest, sql: string): Promise<{ columns: string[]; rows: unknown[][]; truncated: boolean }> {
-    const credential = auth(request.credential); const { host, port = 3306, database } = request.source.connection!
-    let socket: net.Socket | tls.TLSSocket = net.createConnection({ host, port })
+    const credential = auth(request.credential); const { database } = request.source.connection!
     const timeout = request.source.connection?.timeoutMs ?? 10_000
+    const { socket: connectedSocket, close: closeProxy } = await connectSocket(request.source.connection!, timeout)
+    let socket: net.Socket | tls.TLSSocket = connectedSocket
     const deadline = setTimeout(() => socket.destroy(new Error(`data-sources: MySQL operation timed out after ${timeout}ms`)), timeout)
     let buffer = Buffer.alloc(0); const columns: string[] = []; const rows: unknown[][] = []; let expectedColumns = 0; let readyForRows = false
     const limits = 'request' in request ? request.request : undefined
@@ -52,7 +62,9 @@ export class MysqlConnector implements ReadConnector {
     }
     socket.on('data', onData)
     const next = (): Promise<Buffer> => new Promise((resolve, reject) => { if (protocolError !== undefined) { reject(protocolError); return } const item = take(); if (protocolError !== undefined) reject(protocolError); else if (item !== undefined) resolve(item); else waiter = { resolve, reject } })
-    await new Promise<void>((resolve, reject) => { socket.once('connect', resolve); socket.once('error', reject) })
+    if (socket.connecting) {
+      await new Promise<void>((resolve, reject) => { socket.once('connect', resolve); socket.once('error', reject) })
+    }
     try {
       const hello = await next(); let at = 1; const serverEnd = hello.indexOf(0, at); const serverVersion = hello.toString('utf8', at, serverEnd); at = serverEnd + 1 + 4; const seed1 = hello.subarray(at, at + 8); at += 9; const capsLow = hello.readUInt16LE(at); at += 2 + 1 + 2; const capsHigh = hello.readUInt16LE(at); at += 2; const caps = (capsLow | (capsHigh << 16)) >>> 0; const authLength = hello[at++]!; at += 10; const seed2 = hello.subarray(at, at + Math.max(13, authLength - 8)).subarray(0, 12); const pluginAt = hello.indexOf(0, at + Math.max(13, authLength - 8)); const plugin = hello.toString('utf8', at + Math.max(13, authLength - 8), pluginAt < 0 ? undefined : pluginAt)
       if (plugin && plugin !== 'mysql_native_password') throw new Error(`data-sources: MySQL authentication ${plugin} is unsupported; configure mysql_native_password for this read-only connector`)
@@ -80,6 +92,6 @@ export class MysqlConnector implements ReadConnector {
       await next(); readyForRows = true
       while (readyForRows) { const row = await next(); if (row[0] === 0xfe && row.length < 9) break; if (row[0] === 0xff) throw new Error(`data-sources: MySQL query rejected: ${row.toString('utf8')}`); let cursor = 0; const values: unknown[] = []; for (let i = 0; i < expectedColumns; i++) { if (row[cursor] === 0xfb) { values.push(null); cursor++; continue } const [n, nextAt] = readLen(row, cursor); values.push(row.toString('utf8', nextAt, nextAt + n)); cursor = nextAt + n } const size = Buffer.byteLength(JSON.stringify(values)); if (rows.length >= maxRows || emittedBytes + size > maxBytes) { truncated = true; socket.destroy(); break } rows.push(values); emittedBytes += size }
       return { columns, rows, truncated }
-    } finally { clearTimeout(deadline); socket.end() }
+    } finally { clearTimeout(deadline); socket.end(); await closeProxy().catch(() => {}) }
   }
 }

@@ -53,8 +53,13 @@ export function guardRead(source: SourceConfig, request: ReadRequest): ReadReque
   }
   if (request.operation === 'sql.query') {
     const sql = stringInput(request.input, 'sql').trim()
-    if (!SQL_READ.test(sql) || SQL_WRITE.test(sql) || sql.includes(';')) {
-      throw new Error('data-sources: only one SELECT, WITH, EXPLAIN, or SHOW statement is permitted')
+    const isRw = source.policy.accessMode === 'rw'
+    if (!isRw) {
+      if (!SQL_READ.test(sql) || SQL_WRITE.test(sql) || sql.includes(';')) {
+        throw new Error('data-sources: only one SELECT, WITH, EXPLAIN, or SHOW statement is permitted')
+      }
+    } else if (sql.includes(';')) {
+      throw new Error('data-sources: only one SQL statement is permitted')
     }
   }
   if (request.operation === 'object.read' || request.operation === 'directory.list') {
